@@ -9,8 +9,7 @@ export default defineConfig({
     tailwindcss(),
     react(),
     webExtension({
-      manifest: "manifest.json",
-      additionalInputs: ["src/sidepanel/sidepanel.html"],
+      manifest: "./manifest.json",
     }),
   ],
   resolve: {
