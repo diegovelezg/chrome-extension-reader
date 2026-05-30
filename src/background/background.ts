@@ -1,8 +1,11 @@
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "CONTENT_EXTRACTED" || message.type === "SELECTION_DETECTED") {
-    chrome.runtime.sendMessage(message).catch(() => {
-      console.log("Side panel not available for message:", message.type);
-    });
+    if (!message._forwarded && sender.tab) {
+      message._forwarded = true;
+      chrome.runtime.sendMessage(message).catch(() => {
+        console.log("Side panel not available for message:", message.type);
+      });
+    }
     sendResponse({ success: true });
     return true;
   }

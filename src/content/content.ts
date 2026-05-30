@@ -14,9 +14,9 @@ async function extractContent(): Promise<{ title: string; content: string; url: 
     const doc = document.cloneNode(true) as Document;
     const reader = new Readability(doc);
     const article = reader.parse();
-      if (article) {
-        content = article.textContent || "";
-      }
+    if (article) {
+      content = article.textContent || "";
+    }
   } catch (e) {
     console.log("Readability parse failed, using fallback", e);
   }

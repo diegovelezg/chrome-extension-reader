@@ -5,20 +5,20 @@ declare const chrome: {
     onMessage: {
       addListener(
         callback: (
-          message: { type: string; data?: unknown },
-          sender: unknown,
+          message: { type: string; data?: unknown; _forwarded?: boolean },
+          sender: { tab?: { id?: number } },
           sendResponse: (response?: unknown) => void
         ) => void
       ): void;
       removeListener(
         callback: (
-          message: { type: string; data?: unknown },
-          sender: unknown,
+          message: { type: string; data?: unknown; _forwarded?: boolean },
+          sender: { tab?: { id?: number } },
           sendResponse: (response?: unknown) => void
         ) => void
       ): void;
     };
-    sendMessage(message: { type: string; data?: unknown }): Promise<void>;
+    sendMessage(message: { type: string; data?: unknown; _forwarded?: boolean }): Promise<void>;
     onInstalled: {
       addListener(callback: () => void): void;
     };
