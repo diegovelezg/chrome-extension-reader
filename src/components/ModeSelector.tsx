@@ -31,7 +31,7 @@ export function ModeSelector({ activeMode, onModeChange }: ModeSelectorProps) {
             onClick={() => onModeChange(mode)}
             className={`
             flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md
-            text-sm font-medium transition-all
+            text-sm font-medium transition-all cursor-pointer
             ${
               activeMode === mode
                 ? "bg-background text-foreground shadow-sm"

@@ -4,6 +4,8 @@ export interface Settings {
   llmModel: string;
   ttsEndpoint: string;
   ttsVoice: string;
+  fontSize: number;
+  lineHeight: number;
   promptExecutiveSummary: string;
   promptDistilledSummary: string;
 }
@@ -14,6 +16,8 @@ export const DEFAULT_SETTINGS: Settings = {
   llmModel: "llama3",
   ttsEndpoint: "http://localhost:8020",
   ttsVoice: "default",
+  fontSize: 16,
+  lineHeight: 1.6,
   promptExecutiveSummary:
     "You are a professional analyst. Read the following content and produce the response in Spanish (castellano):\n1. An Executive Summary (2-3 paragraphs)\n2. Key Takeaways (bullet points)\n\nContent:\n{{content}}",
   promptDistilledSummary:

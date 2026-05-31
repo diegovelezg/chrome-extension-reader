@@ -2,13 +2,14 @@ import { useState, useEffect, useCallback, useRef, useReducer } from "react";
 import { Mode, Settings, DEFAULT_SETTINGS, ExtractedContent } from "../types";
 import { useLLM } from "../lib/useLLM";
 import { useTTS } from "../lib/useTTS";
-import { BookOpen, Copy, RefreshCw, Settings as SettingsIcon } from "lucide-react";
+import { BookOpen, CaseUpper, Copy, Minus, Plus, RefreshCw, Settings as SettingsIcon, TextSelect } from "lucide-react";
 import { ModeSelector } from "../components/ModeSelector";
 import { Markdown } from "../components/Markdown";
 import { TTSControls } from "../components/TTSControls";
 import { SettingsPanel } from "../components/SettingsPanel";
 import { Button } from "../components/ui/button";
 import { Separator } from "../components/ui/separator";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
 
 interface TabData {
   original: string;
@@ -265,6 +266,49 @@ export default function App() {
         <ModeSelector activeMode={mode} onModeChange={handleModeChange} />
       </div>
 
+      <TooltipProvider>
+        <div className="flex items-center justify-between px-4 py-1.5 border-b bg-muted/20">
+          <Tooltip>
+            <TooltipTrigger>
+              <Button variant="ghost" size="xs" onClick={handleCopyRichText}>
+                <Copy className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Copy</TooltipContent>
+          </Tooltip>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="xs" onClick={() => handleSettingsSave({ ...settings, fontSize: Math.max(12, settings.fontSize - 1) })}>
+                <Minus className="size-3" />
+              </Button>
+              <Tooltip>
+                <TooltipTrigger tabIndex={-1}>
+                  <CaseUpper className="size-3.5 text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipContent>Font size</TooltipContent>
+              </Tooltip>
+              <Button variant="ghost" size="xs" onClick={() => handleSettingsSave({ ...settings, fontSize: Math.min(24, settings.fontSize + 1) })}>
+                <Plus className="size-3" />
+              </Button>
+            </div>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="xs" onClick={() => handleSettingsSave({ ...settings, lineHeight: Math.max(1.0, +(settings.lineHeight - 0.1).toFixed(1)) })}>
+                <Minus className="size-3" />
+              </Button>
+              <Tooltip>
+                <TooltipTrigger tabIndex={-1}>
+                  <TextSelect className="size-3.5 text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipContent>Line spacing</TooltipContent>
+              </Tooltip>
+              <Button variant="ghost" size="xs" onClick={() => handleSettingsSave({ ...settings, lineHeight: Math.min(2.5, +(settings.lineHeight + 0.1).toFixed(1)) })}>
+                <Plus className="size-3" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </TooltipProvider>
+
       <div className="flex-1 overflow-auto p-4">
         {!displayContent ? (
           <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground">
@@ -273,15 +317,7 @@ export default function App() {
           </div>
         ) : (
           <>
-            {displayContent && (
-              <div className="flex justify-end mb-2">
-                <Button variant="outline" size="xs" onClick={handleCopyRichText} title="Copy rich text">
-                  <Copy className="size-3" />
-                </Button>
-              </div>
-            )}
-
-            <div ref={contentRef}>
+            <div ref={contentRef} style={{ fontSize: `${settings.fontSize}px`, lineHeight: settings.lineHeight }}>
               {mode === "original" && activeTab?.selectedText && (
                 <div>
                   <p className="text-xs text-muted-foreground mb-2">Selected text from page</p>
