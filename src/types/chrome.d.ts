@@ -37,8 +37,9 @@ declare const chrome: {
     };
   };
   tabs: {
-    get(tabId: number, callback: (tab: { id?: number; active?: boolean; windowId?: number }) => void): void;
-    query(options: { active?: boolean; currentWindow?: boolean; windowId?: number }, callback: (tabs: { id?: number; windowId?: number }[]) => void): void;
+    get(tabId: number, callback: (tab: { id?: number; active?: boolean; windowId?: number; url?: string }) => void): void;
+    query(options: { active?: boolean; currentWindow?: boolean; windowId?: number }, callback: (tabs: { id?: number; windowId?: number; url?: string }[]) => void): void;
+    sendMessage(tabId: number, message: { type: string; data?: unknown }, callback?: (response: unknown) => void): void;
     sendMessage(tabId: number, message: { type: string; data?: unknown }): Promise<unknown>;
     onActivated: {
       addListener(callback: (activeInfo: { tabId: number; windowId: number }) => void): void;

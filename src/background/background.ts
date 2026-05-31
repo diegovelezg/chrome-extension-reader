@@ -1,5 +1,10 @@
 const pendingExtractions = new Map<number, ReturnType<typeof setTimeout>>();
 
+function canInjectContentScript(url?: string): boolean {
+  if (!url) return false;
+  return url.startsWith("http://") || url.startsWith("https://") || url.startsWith("file://");
+}
+
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === "sidepanel") {
     port.onDisconnect.addListener(() => {
@@ -17,21 +22,26 @@ function requestExtraction(tabId: number, delay = 0) {
 
   const timer = setTimeout(() => {
     pendingExtractions.delete(tabId);
-    let retries = 0;
-    const maxRetries = 3;
-    const trySend = () => {
-      chrome.tabs.sendMessage(tabId, { type: "REQUEST_EXTRACTION" }).then((response: unknown) => {
-        const r = response as { type?: string; data?: unknown } | undefined;
-        if (r?.type === "CONTENT_EXTRACTED") {
-          chrome.tabs.get(tabId, (tab) => {
+
+    chrome.tabs.get(tabId, (tab) => {
+      if (chrome.runtime.lastError || !canInjectContentScript(tab.url)) return;
+
+      let retries = 0;
+      const maxRetries = 3;
+      const trySend = () => {
+        chrome.tabs.sendMessage(tabId, { type: "REQUEST_EXTRACTION" }, (response: unknown) => {
+          if (chrome.runtime.lastError) {
+            if (++retries < maxRetries) setTimeout(trySend, 500);
+            return;
+          }
+          const r = response as { type?: string; data?: unknown } | undefined;
+          if (r?.type === "CONTENT_EXTRACTED") {
             chrome.runtime.sendMessage({ type: "CONTENT_EXTRACTED", tabId, windowId: tab.windowId, data: r.data }).catch(() => {});
-          });
-        }
-      }).catch(() => {
-        if (++retries < maxRetries) setTimeout(trySend, 500);
-      });
-    };
-    trySend();
+          }
+        });
+      };
+      trySend();
+    });
   }, delay);
 
   pendingExtractions.set(tabId, timer);
@@ -40,23 +50,30 @@ function requestExtraction(tabId: number, delay = 0) {
 chrome.webNavigation.onCompleted.addListener((details) => {
   if (details.frameId === 0) {
     chrome.tabs.get(details.tabId, (tab) => {
+      if (chrome.runtime.lastError || !canInjectContentScript(tab.url)) return;
       if (tab.active) requestExtraction(details.tabId, 500);
     });
   }
 });
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
-  chrome.runtime.sendMessage({
-    type: "ACTIVE_TAB_CHANGED",
-    tabId: activeInfo.tabId,
-    windowId: activeInfo.windowId,
-  }).catch(() => {});
-  requestExtraction(activeInfo.tabId, 300);
+  chrome.tabs.get(activeInfo.tabId, (tab) => {
+    if (chrome.runtime.lastError) return;
+    chrome.runtime.sendMessage({
+      type: "ACTIVE_TAB_CHANGED",
+      tabId: activeInfo.tabId,
+      windowId: activeInfo.windowId,
+    }).catch(() => {});
+    if (canInjectContentScript(tab.url)) {
+      requestExtraction(activeInfo.tabId, 300);
+    }
+  });
 });
 
 chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
   if (details.frameId === 0) {
     chrome.tabs.get(details.tabId, (tab) => {
+      if (chrome.runtime.lastError || !canInjectContentScript(tab.url)) return;
       if (tab.active) requestExtraction(details.tabId, 1500);
     });
   }
@@ -65,6 +82,7 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
 chrome.webNavigation.onReferenceFragmentUpdated.addListener((details) => {
   if (details.frameId === 0) {
     chrome.tabs.get(details.tabId, (tab) => {
+      if (chrome.runtime.lastError || !canInjectContentScript(tab.url)) return;
       if (tab.active) requestExtraction(details.tabId, 1500);
     });
   }
