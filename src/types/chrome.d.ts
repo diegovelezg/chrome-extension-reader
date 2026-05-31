@@ -20,11 +20,16 @@ declare const chrome: {
       onDisconnect: {
         addListener(callback: () => void): void;
       };
+      onMessage: {
+        addListener(callback: (msg: { type: string; windowId?: number }) => void): void;
+      };
+      postMessage(msg: { type: string; windowId?: number }): void;
     };
     onConnect: {
       addListener(callback: (port: {
         name: string;
         onDisconnect: { addListener(callback: () => void): void };
+        onMessage: { addListener(callback: (msg: { type: string; windowId?: number }) => void): void };
       }) => void): void;
     };
     lastError?: { message: string };
@@ -38,7 +43,7 @@ declare const chrome: {
   };
   tabs: {
     get(tabId: number, callback: (tab: { id?: number; active?: boolean; windowId?: number }) => void): void;
-    query(options: { active?: boolean; currentWindow?: boolean }, callback: (tabs: { id?: number; windowId?: number }[]) => void): void;
+    query(options: { active?: boolean; currentWindow?: boolean; windowId?: number }, callback: (tabs: { id?: number; windowId?: number }[]) => void): void;
     sendMessage(tabId: number, message: { type: string; data?: unknown }): Promise<unknown>;
     onActivated: {
       addListener(callback: (activeInfo: { tabId: number; windowId: number }) => void): void;
@@ -66,5 +71,8 @@ declare const chrome: {
         frameId: number;
       }) => void): void;
     };
+  };
+  windows: {
+    getCurrent(callback: (window: { id?: number }) => void): void;
   };
 };

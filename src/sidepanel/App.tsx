@@ -186,13 +186,20 @@ export default function App() {
 
   useEffect(() => {
     const port = chrome.runtime.connect({ name: "sidepanel" });
-    chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION" });
+    chrome.windows.getCurrent((w) => {
+      port.postMessage({ type: "SIDEPANEL_WINDOW", windowId: w.id });
+      chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION" });
+    });
     let disconnected = false;
 
     port.onDisconnect.addListener(() => {
       if (disconnected) return;
-      chrome.runtime.connect({ name: "sidepanel" });
-      chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION" });
+      const newPort = chrome.runtime.connect({ name: "sidepanel" });
+      chrome.windows.getCurrent((w) => {
+        newPort.postMessage({ type: "SIDEPANEL_WINDOW", windowId: w.id });
+        chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION" });
+      });
+      setActiveTabId(null);
     });
 
     return () => {
