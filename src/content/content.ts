@@ -32,6 +32,7 @@ async function extractContent(): Promise<{ title: string; content: string; url: 
     content = document.body.textContent || "";
   }
 
+  content = content.replace(/[\u{1F000}-\u{1FFFF}]|[\u{2600}-\u{27BF}]|[\u{FE00}-\u{FE0F}]|[\u{1F900}-\u{1F9FF}]|[\u{1FA00}-\u{1FA6F}]|[\u{1FA70}-\u{1FAFF}]|[\u{2702}-\u{27B0}]|[\u{24C2}-\u{1F251}]|\u{200D}|\u{FE0F}/gu, "");
   content = content.replace(/\s+/g, " ").split("\n").filter(l => l.trim().length > 20 || l.trim().length === 0).join("\n").replace(/\n{3,}/g, "\n\n").trim();
 
   return { title, content, url };

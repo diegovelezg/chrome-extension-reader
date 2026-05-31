@@ -1,11 +1,8 @@
-let sidePanelConnected = false;
 const pendingExtractions = new Map<number, ReturnType<typeof setTimeout>>();
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === "sidepanel") {
-    sidePanelConnected = true;
     port.onDisconnect.addListener(() => {
-      sidePanelConnected = false;
       for (const [, timer] of pendingExtractions) {
         clearTimeout(timer);
       }
@@ -41,7 +38,7 @@ function requestExtraction(tabId: number, delay = 0) {
 }
 
 chrome.webNavigation.onCompleted.addListener((details) => {
-  if (details.frameId === 0 && sidePanelConnected) {
+  if (details.frameId === 0) {
     chrome.tabs.get(details.tabId, (tab) => {
       if (tab.active) requestExtraction(details.tabId, 500);
     });
@@ -54,10 +51,11 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
     tabId: activeInfo.tabId,
     windowId: activeInfo.windowId,
   }).catch(() => {});
+  requestExtraction(activeInfo.tabId, 300);
 });
 
 chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
-  if (details.frameId === 0 && sidePanelConnected) {
+  if (details.frameId === 0) {
     chrome.tabs.get(details.tabId, (tab) => {
       if (tab.active) requestExtraction(details.tabId, 1500);
     });
@@ -65,7 +63,7 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
 });
 
 chrome.webNavigation.onReferenceFragmentUpdated.addListener((details) => {
-  if (details.frameId === 0 && sidePanelConnected) {
+  if (details.frameId === 0) {
     chrome.tabs.get(details.tabId, (tab) => {
       if (tab.active) requestExtraction(details.tabId, 1500);
     });

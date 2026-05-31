@@ -136,16 +136,19 @@ export default function App() {
         if (message.windowId !== undefined && message.windowId !== windowIdRef.current) return;
         const data = message.data as ExtractedContent;
         const t = getTab(message.tabId);
+        const isNewContent = t.original !== data.content;
         t.original = data.content;
         t.title = data.title;
-        t.selectedText = "";
-        t.executive = "";
-        t.distilled = "";
+        if (isNewContent) {
+          t.selectedText = "";
+          t.executive = "";
+          t.distilled = "";
+        }
 
         if (message.tabId === activeTabId || activeTabId === null) {
           if (activeTabId === null) setActiveTabId(message.tabId);
           bump();
-          if (mode !== "original" && data.content) {
+          if (isNewContent && mode !== "original" && data.content) {
             processWithLLM(data.content, mode);
           }
         }
