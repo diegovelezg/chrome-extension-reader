@@ -26,8 +26,7 @@ export function useLLM(settings: Settings) {
   }
 
   const startStream = useCallback(
-    (prompt: string, systemPrompt: string | null) => {
-      // Abort any existing stream
+    (prompt: string, systemPrompt: string | null, onComplete?: (content: string) => void) => {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
@@ -40,6 +39,8 @@ export function useLLM(settings: Settings) {
         content: "",
         error: null,
       });
+
+      let accumulated = "";
 
       const onChunk: StreamCallback = (chunk) => {
         if (chunk.error) {
@@ -56,9 +57,11 @@ export function useLLM(settings: Settings) {
             ...prev,
             isStreaming: false,
           }));
+          onComplete?.(accumulated);
           return;
         }
 
+        accumulated += chunk.content;
         setState((prev) => ({
           ...prev,
           content: prev.content + chunk.content,
@@ -88,10 +91,19 @@ export function useLLM(settings: Settings) {
     });
   }, []);
 
+  const setContent = useCallback((text: string) => {
+    setState({
+      isStreaming: false,
+      content: text,
+      error: null,
+    });
+  }, []);
+
   return {
     ...state,
     startStream,
     stopStream,
     clearContent,
+    setContent,
   };
 }

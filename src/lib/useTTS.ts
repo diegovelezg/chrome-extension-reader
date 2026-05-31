@@ -8,6 +8,7 @@ export interface TTSState {
   progress: number;
   error: string | null;
   speed: number;
+  isFallback: boolean;
 }
 
 export function useTTS(settings: Settings) {
@@ -17,12 +18,13 @@ export function useTTS(settings: Settings) {
     progress: 0,
     error: null,
     speed: 1.0,
+    isFallback: false,
   });
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const clientRef = useRef<TTSClient | null>(null);
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
-  // Initialize or update client
   useEffect(() => {
     if (!clientRef.current) {
       clientRef.current = createTTSClient(settings);
@@ -31,12 +33,45 @@ export function useTTS(settings: Settings) {
     }
   }, [settings]);
 
+  const stop = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    window.speechSynthesis.cancel();
+    utteranceRef.current = null;
+    setState((prev) => ({ ...prev, isPlaying: false, progress: 0 }));
+  }, []);
+
   const setSpeed = useCallback((speed: number) => {
     setState((prev) => ({ ...prev, speed }));
     if (audioRef.current) {
       audioRef.current.playbackRate = speed;
     }
   }, []);
+
+  const playFallback = useCallback((text: string) => {
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = state.speed;
+    utteranceRef.current = utterance;
+
+    setState((prev) => ({ ...prev, isPlaying: true, isLoading: false, isFallback: true }));
+
+    utterance.onend = () => {
+      setState((prev) => ({ ...prev, isPlaying: false, progress: 0 }));
+      utteranceRef.current = null;
+    };
+
+    utterance.onerror = () => {
+      setState((prev) => ({ ...prev, isPlaying: false, isLoading: false, error: "Browser TTS failed" }));
+      utteranceRef.current = null;
+    };
+
+    window.speechSynthesis.speak(utterance);
+  }, [state.speed]);
 
   const play = useCallback(async (text: string) => {
     if (!text.trim()) return;
@@ -52,7 +87,6 @@ export function useTTS(settings: Settings) {
       const blob = new Blob([audioBuffer], { type: "audio/mp3" });
       const url = URL.createObjectURL(blob);
 
-      // Clean up previous audio
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.src = "";
@@ -63,7 +97,7 @@ export function useTTS(settings: Settings) {
       audio.playbackRate = state.speed;
 
       audio.onplay = () => {
-        setState((prev) => ({ ...prev, isPlaying: true, isLoading: false }));
+        setState((prev) => ({ ...prev, isPlaying: true, isLoading: false, isFallback: false }));
       };
 
       audio.onpause = () => {
@@ -83,42 +117,30 @@ export function useTTS(settings: Settings) {
       };
 
       audio.onerror = () => {
-        setState((prev) => ({
-          ...prev,
-          isPlaying: false,
-          isLoading: false,
-          error: "Audio playback failed",
-        }));
+        console.log("TTS API failed, falling back to browser TTS");
+        playFallback(text);
       };
 
       await audio.play();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      setState((prev) => ({
-        ...prev,
-        isLoading: false,
-        error: message,
-      }));
+      console.log("TTS API unavailable, falling back to browser TTS");
+      playFallback(text);
     }
-  }, [state.speed]);
+  }, [state.speed, playFallback]);
 
   const pause = useCallback(() => {
     if (audioRef.current) {
       audioRef.current.pause();
+    } else {
+      window.speechSynthesis.pause();
     }
   }, []);
 
   const resume = useCallback(() => {
     if (audioRef.current) {
       audioRef.current.play();
-    }
-  }, []);
-
-  const stop = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-      setState((prev) => ({ ...prev, isPlaying: false, progress: 0 }));
+    } else {
+      window.speechSynthesis.resume();
     }
   }, []);
 

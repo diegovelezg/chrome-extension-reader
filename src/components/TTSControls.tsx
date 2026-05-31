@@ -6,6 +6,7 @@ interface TTSControlsProps {
   progress: number;
   speed: number;
   error: string | null;
+  isFallback: boolean;
   onPlay: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -19,6 +20,7 @@ export function TTSControls({
   progress,
   speed,
   error,
+  isFallback,
   onPlay,
   onPause,
   onResume,
@@ -27,6 +29,14 @@ export function TTSControls({
 }: TTSControlsProps) {
   return (
     <div className="flex flex-col gap-3 p-3 bg-muted/50 rounded-lg">
+      {/* Fallback indicator */}
+      {isFallback && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground bg-background/50 px-2 py-1 rounded">
+          <span>🔊</span>
+          <span>Using browser TTS (no TTS endpoint configured)</span>
+        </div>
+      )}
+
       {/* Playback buttons */}
       <div className="flex items-center gap-2">
         {!isPlaying ? (
@@ -45,7 +55,7 @@ export function TTSControls({
             ⏸
           </button>
         )}
-        
+
         <button
           onClick={onStop}
           disabled={!isPlaying}

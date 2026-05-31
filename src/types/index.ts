@@ -15,9 +15,9 @@ export const DEFAULT_SETTINGS: Settings = {
   ttsEndpoint: "http://localhost:8020",
   ttsVoice: "default",
   promptExecutiveSummary:
-    "You are a professional analyst. Read the following content and produce:\n1. An Executive Summary (2-3 paragraphs)\n2. Key Takeaways (bullet points)\n\nContent:\n{{content}}",
+    "You are a professional analyst. Read the following content and produce the response in Spanish (castellano):\n1. An Executive Summary (2-3 paragraphs)\n2. Key Takeaways (bullet points)\n\nContent:\n{{content}}",
   promptDistilledSummary:
-    "You are a professional editor. Read the following content and produce a concise, distilled summary that captures only the essential information in a compact format.\n\nContent:\n{{content}}",
+    "You are a professional editor. Read the following content and produce the response in Spanish (castellano), a concise, distilled summary that captures only the essential information in a compact format.\n\nContent:\n{{content}}",
 };
 
 export type Mode = "executive" | "distilled" | "original";
