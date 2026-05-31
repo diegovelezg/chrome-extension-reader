@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useReducer } from "react";
 import { Mode, Settings, DEFAULT_SETTINGS, ExtractedContent } from "../types";
 import { useLLM } from "../lib/useLLM";
 import { useTTS } from "../lib/useTTS";
@@ -10,117 +10,103 @@ import { SettingsPanel } from "../components/SettingsPanel";
 import { Button } from "../components/ui/button";
 import { Separator } from "../components/ui/separator";
 
-interface TabState {
-  extracted: ExtractedContent | null;
-  selectedText: string | null;
-  executive: string | null;
-  distilled: string | null;
-  mode: Mode;
+interface TabData {
+  original: string;
+  title: string;
+  selectedText: string;
+  executive: string;
+  distilled: string;
+}
+
+function emptyTab(): TabData {
+  return { original: "", title: "", selectedText: "", executive: "", distilled: "" };
+}
+
+function hash(s: string): string {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  return h.toString(36);
 }
 
 export default function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [activeMode, setActiveMode] = useState<Mode>("original");
-  const [content, setContent] = useState<ExtractedContent | null>(null);
-  const [selectedText, setSelectedText] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode>("original");
   const [activeTabId, setActiveTabId] = useState<number | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [, bump] = useReducer((x: number) => x + 1, 0);
 
   const { isStreaming, content: streamedContent, error, startStream, stopStream, clearContent, setContent: setLlmContent } = useLLM(settings);
   const tts = useTTS(settings);
 
-  const modeRef = useRef(activeMode);
-  modeRef.current = activeMode;
-  const settingsRef = useRef(settings);
-  settingsRef.current = settings;
-  const activeTabIdRef = useRef(activeTabId);
-  activeTabIdRef.current = activeTabId;
-  const stateRef = useRef({ content: null as ExtractedContent | null, selectedText: null as string | null, streamedContent: "" });
-  stateRef.current = { content, selectedText, streamedContent };
-  const contentRef = useRef<HTMLDivElement>(null);
-  const tabCacheRef = useRef<Map<number, TabState>>(new Map());
+  const tabsRef = useRef<Map<number, TabData>>(new Map());
   const llmCacheRef = useRef<Map<string, string>>(new Map());
+  const windowIdRef = useRef<number | undefined>(undefined);
+  const contentRef = useRef<HTMLDivElement>(null);
 
-  function hash(s: string): string {
-    let h = 0;
-    for (let i = 0; i < s.length; i++) {
-      h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  const activeTab = activeTabId !== null ? tabsRef.current.get(activeTabId) : undefined;
+
+  function getTab(tabId: number): TabData {
+    let t = tabsRef.current.get(tabId);
+    if (!t) {
+      t = emptyTab();
+      tabsRef.current.set(tabId, t);
     }
-    return h.toString(36);
+    return t;
   }
 
-  function getTabState(tabId: number): TabState {
-    let ts = tabCacheRef.current.get(tabId);
-    if (!ts) {
-      ts = { extracted: null, selectedText: null, executive: null, distilled: null, mode: "original" };
-      tabCacheRef.current.set(tabId, ts);
-    }
-    return ts;
+  function saveCurrentLlm() {
+    if (activeTabId === null || mode === "original" || !streamedContent) return;
+    const t = getTab(activeTabId);
+    t[mode] = streamedContent;
   }
 
-  function snapshotCurrentTab() {
-    const tabId = activeTabIdRef.current;
-    if (tabId === null) return;
-    const s = stateRef.current;
-    const ts = getTabState(tabId);
-    ts.extracted = s.content;
-    ts.selectedText = s.selectedText;
-    ts.mode = modeRef.current;
-    const mode = modeRef.current;
-    if (mode === "executive") ts.executive = s.streamedContent;
-    if (mode === "distilled") ts.distilled = s.streamedContent;
-  }
+  const processWithLLM = useCallback((sourceContent: string, targetMode: Mode) => {
+    const prompt = targetMode === "executive"
+      ? settings.promptExecutiveSummary.replace("{{content}}", sourceContent)
+      : settings.promptDistilledSummary.replace("{{content}}", sourceContent);
 
-  function saveLlmToTab(content: string, mode: Mode) {
-    const tabId = activeTabIdRef.current;
-    if (tabId === null) return;
-    const ts = getTabState(tabId);
-    if (mode === "executive") ts.executive = content;
-    if (mode === "distilled") ts.distilled = content;
-  }
-
-  function restoreTab(tabId: number) {
-    const ts = getTabState(tabId);
-    setContent(ts.extracted);
-    setSelectedText(ts.selectedText);
-    clearContent();
-    setActiveMode(ts.mode);
-
-    if (!ts.extracted) {
-      chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION" });
-      return;
-    }
-
-    const mode = ts.mode;
-    if (mode === "executive" && ts.executive) {
-      setLlmContent(ts.executive);
-    } else if (mode === "distilled" && ts.distilled) {
-      setLlmContent(ts.distilled);
-    } else if (mode !== "original") {
-      const source = ts.selectedText || ts.extracted?.content;
-      if (source) processWithLLM(source, mode);
-    }
-  }
-
-  const processWithLLM = useCallback((sourceContent: string, mode: Mode) => {
-    const s = settingsRef.current;
-    const prompt = mode === "executive"
-      ? s.promptExecutiveSummary.replace("{{content}}", sourceContent)
-      : s.promptDistilledSummary.replace("{{content}}", sourceContent);
-
-    const key = `${hash(sourceContent)}|${mode}|${prompt}`;
+    const key = `${hash(sourceContent)}|${targetMode}|${prompt}`;
     const cached = llmCacheRef.current.get(key);
     if (cached !== undefined) {
       setLlmContent(cached);
-      saveLlmToTab(cached, mode);
+      if (activeTabId !== null) {
+        getTab(activeTabId)[targetMode] = cached;
+      }
       return;
     }
 
     startStream(prompt, null, (result) => {
       llmCacheRef.current.set(key, result);
-      saveLlmToTab(result, mode);
+      if (activeTabId !== null) {
+        getTab(activeTabId)[targetMode] = result;
+      }
     });
-  }, [setLlmContent, startStream]);
+  }, [settings, activeTabId, setLlmContent, startStream]);
+
+  function switchToTab(tabId: number) {
+    saveCurrentLlm();
+    clearContent();
+    setActiveTabId(tabId);
+    bump();
+
+    const t = getTab(tabId);
+
+    if (!t.original) {
+      chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION", windowId: windowIdRef.current });
+      return;
+    }
+
+    if (mode !== "original") {
+      if (t[mode]) {
+        setLlmContent(t[mode]);
+      } else {
+        const source = t.selectedText || t.original;
+        if (source) processWithLLM(source, mode);
+      }
+    }
+  }
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -141,65 +127,60 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const handler = (message: { type: string; tabId?: number; data?: unknown }) => {
-      if (message.type === "CONTENT_EXTRACTED" && message.tabId !== undefined) {
-        const data = message.data as ExtractedContent;
-        const ts = getTabState(message.tabId);
-        ts.extracted = data;
-        ts.selectedText = null;
+    chrome.windows.getCurrent((w) => {
+      windowIdRef.current = w.id;
+    });
 
-        if (message.tabId === activeTabIdRef.current) {
-          setContent(data);
-          setSelectedText(null);
-          const mode = modeRef.current;
-          if (mode !== "original" && data.content) {
-            processWithLLM(data.content, mode);
-          }
-        } else if (activeTabIdRef.current === null) {
-          setActiveTabId(message.tabId);
-          setContent(data);
-          setSelectedText(null);
-          const mode = modeRef.current;
+    const handler = (message: { type: string; tabId?: number; windowId?: number; data?: unknown }, sender: { tab?: { id?: number; windowId?: number } }) => {
+      if (message.type === "CONTENT_EXTRACTED" && message.tabId !== undefined) {
+        if (message.windowId !== undefined && message.windowId !== windowIdRef.current) return;
+        const data = message.data as ExtractedContent;
+        const t = getTab(message.tabId);
+        t.original = data.content;
+        t.title = data.title;
+        t.selectedText = "";
+        t.executive = "";
+        t.distilled = "";
+
+        if (message.tabId === activeTabId || activeTabId === null) {
+          if (activeTabId === null) setActiveTabId(message.tabId);
+          bump();
           if (mode !== "original" && data.content) {
             processWithLLM(data.content, mode);
           }
         }
       } else if (message.type === "ACTIVE_TAB_CHANGED" && message.tabId !== undefined) {
-        snapshotCurrentTab();
-        setActiveTabId(message.tabId);
-        restoreTab(message.tabId);
+        if (message.windowId !== undefined && message.windowId !== windowIdRef.current) return;
+        switchToTab(message.tabId);
       } else if (message.type === "SELECTION_DETECTED") {
+        if (sender.tab?.windowId !== undefined && sender.tab.windowId !== windowIdRef.current) return;
         const data = message.data as { text: string; url: string };
-        const tabId = activeTabIdRef.current;
-        if (tabId === null) return;
-        getTabState(tabId).selectedText = data.text;
-        setSelectedText(data.text);
-        const mode = modeRef.current;
+        if (activeTabId === null) return;
+        const t = getTab(activeTabId);
+        t.selectedText = data.text;
+        bump();
         if (mode !== "original" && data.text) {
           processWithLLM(data.text, mode);
         }
       }
     };
+
     chrome.runtime.onMessage.addListener(handler);
     return () => chrome.runtime.onMessage.removeListener(handler);
-  }, [processWithLLM]);
+  }, [mode, activeTabId, processWithLLM]);
 
   useEffect(() => {
     const port = chrome.runtime.connect({ name: "sidepanel" });
-    chrome.windows.getCurrent((w) => {
-      port.postMessage({ type: "SIDEPANEL_WINDOW", windowId: w.id });
-      chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION" });
-    });
+    chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION", windowId: windowIdRef.current });
     let disconnected = false;
 
     port.onDisconnect.addListener(() => {
       if (disconnected) return;
-      const newPort = chrome.runtime.connect({ name: "sidepanel" });
-      chrome.windows.getCurrent((w) => {
-        newPort.postMessage({ type: "SIDEPANEL_WINDOW", windowId: w.id });
-        chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION" });
-      });
+      disconnected = true;
+      chrome.runtime.connect({ name: "sidepanel" });
+      chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION", windowId: windowIdRef.current });
       setActiveTabId(null);
+      clearContent();
     });
 
     return () => {
@@ -208,52 +189,38 @@ export default function App() {
     };
   }, []);
 
-  const handleModeChange = useCallback((mode: Mode) => {
-    snapshotCurrentTab();
-    setActiveMode(mode);
+  const handleModeChange = useCallback((newMode: Mode) => {
+    saveCurrentLlm();
     clearContent();
     tts.stop();
+    setMode(newMode);
 
-    const tabId = activeTabIdRef.current;
-    if (tabId !== null) {
-      getTabState(tabId).mode = mode;
-    }
+    if (newMode === "original" || activeTabId === null) return;
 
-    if (mode === "original") return;
+    const t = getTab(activeTabId);
 
-    if (tabId === null) return;
-    const ts = getTabState(tabId);
-
-    if (mode === "executive" && ts.executive) {
-      setLlmContent(ts.executive);
-    } else if (mode === "distilled" && ts.distilled) {
-      setLlmContent(ts.distilled);
+    if (t[newMode]) {
+      setLlmContent(t[newMode]);
     } else {
-      const source = ts.selectedText || ts.extracted?.content;
-      if (source) processWithLLM(source, mode);
+      const source = t.selectedText || t.original;
+      if (source) processWithLLM(source, newMode);
     }
-  }, [clearContent, tts, setLlmContent, processWithLLM]);
+  }, [activeTabId, clearContent, tts, setLlmContent, processWithLLM]);
 
   const handleReextract = useCallback(() => {
-    const tabId = activeTabIdRef.current;
-    if (tabId !== null) {
-      const ts = getTabState(tabId);
-      ts.extracted = null;
-      ts.selectedText = null;
-      ts.executive = null;
-      ts.distilled = null;
+    if (activeTabId !== null) {
+      tabsRef.current.delete(activeTabId);
     }
-    setContent(null);
-    setSelectedText(null);
     clearContent();
     tts.stop();
-    chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION" });
-  }, [clearContent, tts]);
+    bump();
+    chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION", windowId: windowIdRef.current });
+  }, [activeTabId, clearContent, tts]);
 
   const handlePlayTTS = useCallback(() => {
-    const text = streamedContent || selectedText || content?.content || "";
+    const text = streamedContent || activeTab?.selectedText || activeTab?.original || "";
     if (text) tts.play(text);
-  }, [streamedContent, selectedText, content, tts]);
+  }, [streamedContent, activeTab, tts]);
 
   const handleSettingsSave = useCallback((newSettings: Settings) => {
     setSettings(newSettings);
@@ -276,25 +243,27 @@ export default function App() {
     }
   }, []);
 
-  const displayContent = activeMode === "original" ? (selectedText || content?.content) : streamedContent;
+  const displayContent = mode === "original"
+    ? (activeTab?.selectedText || activeTab?.original)
+    : streamedContent;
 
   return (
     <div className="flex flex-col h-screen">
       <header className="flex items-center justify-between px-4 py-3 border-b">
         <h1 className="text-lg font-semibold">Reader</h1>
         <div className="flex items-center gap-2">
-          {content && <span className="text-xs text-muted-foreground truncate max-w-[200px]">{content.title}</span>}
+          {activeTab?.title && <span className="text-xs text-muted-foreground truncate max-w-[200px]">{activeTab.title}</span>}
           <Button variant="ghost" size="sm" onClick={handleReextract}><RefreshCw className="size-4" /></Button>
           <Button variant="ghost" size="sm" onClick={() => setShowSettings(true)}><SettingsIcon className="size-4" /></Button>
         </div>
       </header>
 
       <div className="px-4 py-3 border-b bg-muted/30">
-        <ModeSelector activeMode={activeMode} onModeChange={handleModeChange} />
+        <ModeSelector activeMode={mode} onModeChange={handleModeChange} />
       </div>
 
       <div className="flex-1 overflow-auto p-4">
-        {!content && !streamedContent && !selectedText ? (
+        {!displayContent ? (
           <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground">
             <BookOpen className="size-16 mb-4 text-muted-foreground/50" />
             <p className="text-sm text-center">Navigate to a page and click the extension icon</p>
@@ -310,21 +279,21 @@ export default function App() {
             )}
 
             <div ref={contentRef}>
-              {activeMode === "original" && selectedText && (
+              {mode === "original" && activeTab?.selectedText && (
                 <div>
                   <p className="text-xs text-muted-foreground mb-2">Selected text from page</p>
-                  <Markdown content={selectedText} />
+                  <Markdown content={activeTab.selectedText} />
                 </div>
               )}
 
-              {content && activeMode === "original" && !selectedText && (
+              {mode === "original" && activeTab?.original && !activeTab?.selectedText && (
                 <div>
-                  <p className="text-xs text-muted-foreground mb-4">{content.title}</p>
-                  <Markdown content={content.content} />
+                  <p className="text-xs text-muted-foreground mb-4">{activeTab.title}</p>
+                  <Markdown content={activeTab.original} />
                 </div>
               )}
 
-              {streamedContent && (
+              {streamedContent && mode !== "original" && (
                 <Markdown content={streamedContent} />
               )}
             </div>

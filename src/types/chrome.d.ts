@@ -4,32 +4,27 @@ declare const chrome: {
   runtime: {
     onMessage: {
       addListener(callback: (
-        message: { type: string; tabId?: number; data?: unknown },
-        sender: { tab?: { id?: number } },
+        message: { type: string; tabId?: number; windowId?: number; data?: unknown },
+        sender: { tab?: { id?: number; windowId?: number } },
         sendResponse: (response?: unknown) => void
       ) => void): void;
       removeListener(callback: (
-        message: { type: string; tabId?: number; data?: unknown },
-        sender: { tab?: { id?: number } },
+        message: { type: string; tabId?: number; windowId?: number; data?: unknown },
+        sender: { tab?: { id?: number; windowId?: number } },
         sendResponse: (response?: unknown) => void
       ) => void): void;
     };
-    sendMessage(message: { type: string; tabId?: number; data?: unknown }): Promise<void>;
+    sendMessage(message: { type: string; tabId?: number; windowId?: number; data?: unknown }): Promise<void>;
     connect(connectInfo: { name: string }): {
       disconnect(): void;
       onDisconnect: {
         addListener(callback: () => void): void;
       };
-      onMessage: {
-        addListener(callback: (msg: { type: string; windowId?: number }) => void): void;
-      };
-      postMessage(msg: { type: string; windowId?: number }): void;
     };
     onConnect: {
       addListener(callback: (port: {
         name: string;
         onDisconnect: { addListener(callback: () => void): void };
-        onMessage: { addListener(callback: (msg: { type: string; windowId?: number }) => void): void };
       }) => void): void;
     };
     lastError?: { message: string };
