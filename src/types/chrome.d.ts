@@ -55,5 +55,12 @@ declare const chrome: {
         frameId: number;
       }) => void): void;
     };
+    onReferenceFragmentUpdated: {
+      addListener(callback: (details: {
+        tabId: number;
+        url: string;
+        frameId: number;
+      }) => void): void;
+    };
   };
 };

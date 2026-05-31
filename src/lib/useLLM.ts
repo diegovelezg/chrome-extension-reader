@@ -84,6 +84,9 @@ export function useLLM(settings: Settings) {
   }, []);
 
   const clearContent = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
     setState({
       isStreaming: false,
       content: "",

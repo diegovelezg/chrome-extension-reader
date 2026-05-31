@@ -50,6 +50,12 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
   }
 });
 
+chrome.webNavigation.onReferenceFragmentUpdated.addListener((details) => {
+  if (details.frameId === 0 && sidePanelConnected) {
+    requestExtraction(details.tabId, 1500);
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "REQUEST_EXTRACTION") {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {

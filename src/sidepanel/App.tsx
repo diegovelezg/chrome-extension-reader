@@ -97,17 +97,29 @@ export default function App() {
   useEffect(() => {
     const port = chrome.runtime.connect({ name: "sidepanel" });
     chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION" });
-    return () => port.disconnect();
+    let disconnected = false;
+
+    port.onDisconnect.addListener(() => {
+      if (disconnected) return;
+      chrome.runtime.connect({ name: "sidepanel" });
+      chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION" });
+    });
+
+    return () => {
+      disconnected = true;
+      port.disconnect();
+    };
   }, []);
 
   const handleModeChange = useCallback((mode: Mode) => {
     setActiveMode(mode);
     clearContent();
     tts.stop();
-    if (mode !== "original" && content) {
-      processWithLLM(content.content, mode);
+    if (mode !== "original") {
+      const source = selectedText || content?.content;
+      if (source) processWithLLM(source, mode);
     }
-  }, [content, clearContent, tts, processWithLLM]);
+  }, [content, selectedText, clearContent, tts, processWithLLM]);
 
   const handleReextract = useCallback(() => {
     setContent(null);
