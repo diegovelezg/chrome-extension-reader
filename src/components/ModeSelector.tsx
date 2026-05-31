@@ -1,3 +1,4 @@
+import { BarChart3, PencilLine, FileText } from "lucide-react";
 import { Mode } from "../types";
 
 interface ModeSelectorProps {
@@ -5,33 +6,44 @@ interface ModeSelectorProps {
   onModeChange: (mode: Mode) => void;
 }
 
-const modes: { id: Mode; label: string; icon: string }[] = [
-  { id: "executive", label: "Executive", icon: "📊" },
-  { id: "distilled", label: "Distilled", icon: "📝" },
-  { id: "original", label: "Original", icon: "📄" },
-];
+const modeIcons: Record<Mode, typeof BarChart3> = {
+  executive: BarChart3,
+  distilled: PencilLine,
+  original: FileText,
+};
+
+const modeLabels: Record<Mode, string> = {
+  executive: "Executive",
+  distilled: "Distilled",
+  original: "Original",
+};
 
 export function ModeSelector({ activeMode, onModeChange }: ModeSelectorProps) {
+  const modes: Mode[] = ["executive", "distilled", "original"];
+
   return (
     <div className="flex gap-1 p-1 bg-muted rounded-lg">
-      {modes.map((mode) => (
-        <button
-          key={mode.id}
-          onClick={() => onModeChange(mode.id)}
-          className={`
+      {modes.map((mode) => {
+        const Icon = modeIcons[mode];
+        return (
+          <button
+            key={mode}
+            onClick={() => onModeChange(mode)}
+            className={`
             flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md
             text-sm font-medium transition-all
             ${
-              activeMode === mode.id
+              activeMode === mode
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground hover:bg-background/50"
             }
           `}
-        >
-          <span>{mode.icon}</span>
-          <span>{mode.label}</span>
-        </button>
-      ))}
+          >
+            <Icon className="size-4" />
+            <span>{modeLabels[mode]}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

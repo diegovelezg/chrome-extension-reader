@@ -26,7 +26,7 @@ function requestExtraction(tabId: number, delay = 0) {
       chrome.tabs.sendMessage(tabId, { type: "REQUEST_EXTRACTION" }).then((response: unknown) => {
         const r = response as { type?: string; data?: unknown } | undefined;
         if (r?.type === "CONTENT_EXTRACTED") {
-          chrome.runtime.sendMessage(r as { type: string; data: unknown });
+          chrome.runtime.sendMessage({ type: "CONTENT_EXTRACTED", tabId, data: r.data });
         }
       }).catch(() => {
         if (++retries < maxRetries) setTimeout(trySend, 500);
@@ -40,7 +40,15 @@ function requestExtraction(tabId: number, delay = 0) {
 
 chrome.webNavigation.onCompleted.addListener((details) => {
   if (details.frameId === 0 && sidePanelConnected) {
-    requestExtraction(details.tabId, 500);
+    chrome.tabs.get(details.tabId, (tab) => {
+      if (tab.active) requestExtraction(details.tabId, 500);
+    });
+  }
+});
+
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  if (sidePanelConnected) {
+    chrome.runtime.sendMessage({ type: "ACTIVE_TAB_CHANGED", tabId: activeInfo.tabId });
   }
 });
 

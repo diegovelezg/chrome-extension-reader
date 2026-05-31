@@ -1,3 +1,4 @@
+import { Loader2, Pause, Play, Square, Volume2 } from "lucide-react";
 import { Slider } from "../components/ui/slider";
 
 interface TTSControlsProps {
@@ -29,15 +30,13 @@ export function TTSControls({
 }: TTSControlsProps) {
   return (
     <div className="flex flex-col gap-3 p-3 bg-muted/50 rounded-lg">
-      {/* Fallback indicator */}
       {isFallback && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground bg-background/50 px-2 py-1 rounded">
-          <span>🔊</span>
+          <Volume2 className="size-3" />
           <span>Using browser TTS (no TTS endpoint configured)</span>
         </div>
       )}
 
-      {/* Playback buttons */}
       <div className="flex items-center gap-2">
         {!isPlaying ? (
           <button
@@ -45,14 +44,14 @@ export function TTSControls({
             disabled={isLoading}
             className="flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
-            ▶
+            <Play className="size-5 fill-current" />
           </button>
         ) : (
           <button
             onClick={isPlaying ? onPause : onResume}
             className="flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
           >
-            ⏸
+            <Pause className="size-5 fill-current" />
           </button>
         )}
 
@@ -61,12 +60,12 @@ export function TTSControls({
           disabled={!isPlaying}
           className="flex items-center justify-center w-10 h-10 rounded-full bg-muted hover:bg-muted/80 disabled:opacity-50"
         >
-          ⏹
+          <Square className="size-4 fill-current" />
         </button>
 
         {isLoading && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="animate-spin">⏳</span>
+            <Loader2 className="size-4 animate-spin" />
             <span>Generating audio...</span>
           </div>
         )}
@@ -76,7 +75,6 @@ export function TTSControls({
         )}
       </div>
 
-      {/* Progress bar */}
       {isPlaying && (
         <div className="space-y-1">
           <div className="h-1.5 bg-muted rounded-full overflow-hidden">
@@ -91,7 +89,6 @@ export function TTSControls({
         </div>
       )}
 
-      {/* Speed control */}
       <div className="flex items-center gap-3">
         <span className="text-xs text-muted-foreground w-12">Speed</span>
         <Slider

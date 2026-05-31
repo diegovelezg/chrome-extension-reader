@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Mode, Settings, DEFAULT_SETTINGS, ExtractedContent } from "../types";
 import { useLLM } from "../lib/useLLM";
 import { useTTS } from "../lib/useTTS";
+import { BookOpen, Copy, RefreshCw, Settings as SettingsIcon } from "lucide-react";
 import { ModeSelector } from "../components/ModeSelector";
 import { Markdown } from "../components/Markdown";
 import { TTSControls } from "../components/TTSControls";
@@ -9,11 +10,20 @@ import { SettingsPanel } from "../components/SettingsPanel";
 import { Button } from "../components/ui/button";
 import { Separator } from "../components/ui/separator";
 
+interface TabState {
+  extracted: ExtractedContent | null;
+  selectedText: string | null;
+  executive: string | null;
+  distilled: string | null;
+  mode: Mode;
+}
+
 export default function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [activeMode, setActiveMode] = useState<Mode>("original");
   const [content, setContent] = useState<ExtractedContent | null>(null);
   const [selectedText, setSelectedText] = useState<string | null>(null);
+  const [activeTabId, setActiveTabId] = useState<number | null>(null);
   const [showSettings, setShowSettings] = useState(false);
 
   const { isStreaming, content: streamedContent, error, startStream, stopStream, clearContent, setContent: setLlmContent } = useLLM(settings);
@@ -23,7 +33,12 @@ export default function App() {
   modeRef.current = activeMode;
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+  const activeTabIdRef = useRef(activeTabId);
+  activeTabIdRef.current = activeTabId;
+  const stateRef = useRef({ content: null as ExtractedContent | null, selectedText: null as string | null, streamedContent: "" });
+  stateRef.current = { content, selectedText, streamedContent };
   const contentRef = useRef<HTMLDivElement>(null);
+  const tabCacheRef = useRef<Map<number, TabState>>(new Map());
   const llmCacheRef = useRef<Map<string, string>>(new Map());
 
   function hash(s: string): string {
@@ -33,6 +48,79 @@ export default function App() {
     }
     return h.toString(36);
   }
+
+  function getTabState(tabId: number): TabState {
+    let ts = tabCacheRef.current.get(tabId);
+    if (!ts) {
+      ts = { extracted: null, selectedText: null, executive: null, distilled: null, mode: "original" };
+      tabCacheRef.current.set(tabId, ts);
+    }
+    return ts;
+  }
+
+  function snapshotCurrentTab() {
+    const tabId = activeTabIdRef.current;
+    if (tabId === null) return;
+    const s = stateRef.current;
+    const ts = getTabState(tabId);
+    ts.extracted = s.content;
+    ts.selectedText = s.selectedText;
+    ts.mode = modeRef.current;
+    const mode = modeRef.current;
+    if (mode === "executive") ts.executive = s.streamedContent;
+    if (mode === "distilled") ts.distilled = s.streamedContent;
+  }
+
+  function saveLlmToTab(content: string, mode: Mode) {
+    const tabId = activeTabIdRef.current;
+    if (tabId === null) return;
+    const ts = getTabState(tabId);
+    if (mode === "executive") ts.executive = content;
+    if (mode === "distilled") ts.distilled = content;
+  }
+
+  function restoreTab(tabId: number) {
+    const ts = getTabState(tabId);
+    setContent(ts.extracted);
+    setSelectedText(ts.selectedText);
+    clearContent();
+    setActiveMode(ts.mode);
+
+    if (!ts.extracted) {
+      chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION" });
+      return;
+    }
+
+    const mode = ts.mode;
+    if (mode === "executive" && ts.executive) {
+      setLlmContent(ts.executive);
+    } else if (mode === "distilled" && ts.distilled) {
+      setLlmContent(ts.distilled);
+    } else if (mode !== "original") {
+      const source = ts.selectedText || ts.extracted?.content;
+      if (source) processWithLLM(source, mode);
+    }
+  }
+
+  const processWithLLM = useCallback((sourceContent: string, mode: Mode) => {
+    const s = settingsRef.current;
+    const prompt = mode === "executive"
+      ? s.promptExecutiveSummary.replace("{{content}}", sourceContent)
+      : s.promptDistilledSummary.replace("{{content}}", sourceContent);
+
+    const key = `${hash(sourceContent)}|${mode}|${prompt}`;
+    const cached = llmCacheRef.current.get(key);
+    if (cached !== undefined) {
+      setLlmContent(cached);
+      saveLlmToTab(cached, mode);
+      return;
+    }
+
+    startStream(prompt, null, (result) => {
+      llmCacheRef.current.set(key, result);
+      saveLlmToTab(result, mode);
+    });
+  }, [setLlmContent, startStream]);
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -52,37 +140,39 @@ export default function App() {
     });
   }, []);
 
-  const processWithLLM = useCallback((sourceContent: string, mode: Mode) => {
-    const s = settingsRef.current;
-    const prompt = mode === "executive"
-      ? s.promptExecutiveSummary.replace("{{content}}", sourceContent)
-      : s.promptDistilledSummary.replace("{{content}}", sourceContent);
-
-    const key = `${hash(sourceContent)}|${mode}|${prompt}`;
-    const cached = llmCacheRef.current.get(key);
-    if (cached !== undefined) {
-      setLlmContent(cached);
-      return;
-    }
-
-    startStream(prompt, null, (result) => {
-      llmCacheRef.current.set(key, result);
-    });
-  }, [setLlmContent, startStream]);
-
   useEffect(() => {
-    const handler = (message: { type: string; data?: unknown }) => {
-      if (message.type === "CONTENT_EXTRACTED") {
+    const handler = (message: { type: string; tabId?: number; data?: unknown }) => {
+      if (message.type === "CONTENT_EXTRACTED" && message.tabId !== undefined) {
         const data = message.data as ExtractedContent;
-        setContent(data);
-        setSelectedText(null);
-        llmCacheRef.current.clear();
-        const mode = modeRef.current;
-        if (mode !== "original" && data.content) {
-          processWithLLM(data.content, mode);
+        const ts = getTabState(message.tabId);
+        ts.extracted = data;
+        ts.selectedText = null;
+
+        if (message.tabId === activeTabIdRef.current) {
+          setContent(data);
+          setSelectedText(null);
+          const mode = modeRef.current;
+          if (mode !== "original" && data.content) {
+            processWithLLM(data.content, mode);
+          }
+        } else if (activeTabIdRef.current === null) {
+          setActiveTabId(message.tabId);
+          setContent(data);
+          setSelectedText(null);
+          const mode = modeRef.current;
+          if (mode !== "original" && data.content) {
+            processWithLLM(data.content, mode);
+          }
         }
+      } else if (message.type === "ACTIVE_TAB_CHANGED" && message.tabId !== undefined) {
+        snapshotCurrentTab();
+        setActiveTabId(message.tabId);
+        restoreTab(message.tabId);
       } else if (message.type === "SELECTION_DETECTED") {
         const data = message.data as { text: string; url: string };
+        const tabId = activeTabIdRef.current;
+        if (tabId === null) return;
+        getTabState(tabId).selectedText = data.text;
         setSelectedText(data.text);
         const mode = modeRef.current;
         if (mode !== "original" && data.text) {
@@ -112,20 +202,43 @@ export default function App() {
   }, []);
 
   const handleModeChange = useCallback((mode: Mode) => {
+    snapshotCurrentTab();
     setActiveMode(mode);
     clearContent();
     tts.stop();
-    if (mode !== "original") {
-      const source = selectedText || content?.content;
+
+    const tabId = activeTabIdRef.current;
+    if (tabId !== null) {
+      getTabState(tabId).mode = mode;
+    }
+
+    if (mode === "original") return;
+
+    if (tabId === null) return;
+    const ts = getTabState(tabId);
+
+    if (mode === "executive" && ts.executive) {
+      setLlmContent(ts.executive);
+    } else if (mode === "distilled" && ts.distilled) {
+      setLlmContent(ts.distilled);
+    } else {
+      const source = ts.selectedText || ts.extracted?.content;
       if (source) processWithLLM(source, mode);
     }
-  }, [content, selectedText, clearContent, tts, processWithLLM]);
+  }, [clearContent, tts, setLlmContent, processWithLLM]);
 
   const handleReextract = useCallback(() => {
+    const tabId = activeTabIdRef.current;
+    if (tabId !== null) {
+      const ts = getTabState(tabId);
+      ts.extracted = null;
+      ts.selectedText = null;
+      ts.executive = null;
+      ts.distilled = null;
+    }
     setContent(null);
     setSelectedText(null);
     clearContent();
-    llmCacheRef.current.clear();
     tts.stop();
     chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION" });
   }, [clearContent, tts]);
@@ -164,8 +277,8 @@ export default function App() {
         <h1 className="text-lg font-semibold">Reader</h1>
         <div className="flex items-center gap-2">
           {content && <span className="text-xs text-muted-foreground truncate max-w-[200px]">{content.title}</span>}
-          <Button variant="ghost" size="sm" onClick={handleReextract}>↻</Button>
-          <Button variant="ghost" size="sm" onClick={() => setShowSettings(true)}>⚙</Button>
+          <Button variant="ghost" size="sm" onClick={handleReextract}><RefreshCw className="size-4" /></Button>
+          <Button variant="ghost" size="sm" onClick={() => setShowSettings(true)}><SettingsIcon className="size-4" /></Button>
         </div>
       </header>
 
@@ -176,7 +289,7 @@ export default function App() {
       <div className="flex-1 overflow-auto p-4">
         {!content && !streamedContent && !selectedText ? (
           <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground">
-            <div className="text-4xl mb-4">📖</div>
+            <BookOpen className="size-16 mb-4 text-muted-foreground/50" />
             <p className="text-sm text-center">Navigate to a page and click the extension icon</p>
           </div>
         ) : (
@@ -184,7 +297,7 @@ export default function App() {
             {displayContent && (
               <div className="flex justify-end mb-2">
                 <Button variant="outline" size="xs" onClick={handleCopyRichText} title="Copy rich text">
-                  📋
+                  <Copy className="size-3" />
                 </Button>
               </div>
             )}
