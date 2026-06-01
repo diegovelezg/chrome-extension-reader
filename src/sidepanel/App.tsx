@@ -31,6 +31,45 @@ function hash(s: string): string {
   return h.toString(36);
 }
 
+function extractFromTab(tabId: number): Promise<ExtractedContent | null> {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabId, { type: "REQUEST_EXTRACTION" }, (response: unknown) => {
+      if (chrome.runtime.lastError) {
+        console.warn("[Reader] Content script not ready, injecting...", chrome.runtime.lastError.message);
+        chrome.scripting.executeScript({ target: { tabId }, files: ["src/content/content.js"] }, () => {
+          if (chrome.runtime.lastError) {
+            console.error("[Reader] Script injection failed:", chrome.runtime.lastError.message);
+            resolve(null);
+            return;
+          }
+          setTimeout(() => {
+            chrome.tabs.sendMessage(tabId, { type: "REQUEST_EXTRACTION" }, (resp: unknown) => {
+              if (chrome.runtime.lastError) {
+                console.error("[Reader] Extraction after injection failed:", chrome.runtime.lastError.message);
+                resolve(null);
+                return;
+              }
+              const r = resp as { type?: string; data?: unknown } | undefined;
+              if (r?.type === "CONTENT_EXTRACTED") {
+                resolve(r.data as ExtractedContent);
+              } else {
+                resolve(null);
+              }
+            });
+          }, 300);
+        });
+        return;
+      }
+      const r = response as { type?: string; data?: unknown } | undefined;
+      if (r?.type === "CONTENT_EXTRACTED") {
+        resolve(r.data as ExtractedContent);
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+
 export default function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [mode, setMode] = useState<Mode>("original");
@@ -43,8 +82,15 @@ export default function App() {
 
   const tabsRef = useRef<Map<number, TabData>>(new Map());
   const llmCacheRef = useRef<Map<string, string>>(new Map());
-  const windowIdRef = useRef<number | undefined>(undefined);
   const contentRef = useRef<HTMLDivElement>(null);
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const activeTabIdRef = useRef(activeTabId);
+  activeTabIdRef.current = activeTabId;
+  const processWithLLMRef = useRef<(sourceContent: string, targetMode: Mode) => void>(null!);
+  const switchToTabRef = useRef<(tabId: number) => void>(null!);
+  const extractionInProgressRef = useRef<Set<number>>(new Set());
+  const navigationDebounceRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
   const activeTab = activeTabId !== null ? tabsRef.current.get(activeTabId) : undefined;
 
@@ -85,6 +131,52 @@ export default function App() {
       }
     });
   }, [settings, activeTabId, setLlmContent, startStream]);
+  processWithLLMRef.current = processWithLLM;
+
+  function normalizeContent(s: string): string {
+    return s.replace(/\s+/g, " ").trim();
+  }
+
+  function requestExtractionForTab(tabId: number) {
+    if (extractionInProgressRef.current.has(tabId)) {
+      console.log("[Reader] Extraction already in progress for tab", tabId, "— skipping");
+      return;
+    }
+    extractionInProgressRef.current.add(tabId);
+    console.log("[Reader] Extracting content from tab", tabId);
+    extractFromTab(tabId).then((data) => {
+      extractionInProgressRef.current.delete(tabId);
+      if (!data) {
+        console.warn("[Reader] Extraction returned no data for tab", tabId);
+        return;
+      }
+      const newContent = data.content || "";
+      console.log("[Reader] Content extracted:", data.title, newContent.length, "chars");
+      const t = getTab(tabId);
+
+      if (newContent.length < 50 && t.original.length > 200) {
+        console.log("[Reader] New content too short, keeping existing content");
+        return;
+      }
+
+      const isNewContent = normalizeContent(t.original) !== normalizeContent(newContent);
+      t.original = newContent;
+      t.title = data.title;
+      if (isNewContent) {
+        t.selectedText = "";
+        t.executive = "";
+        t.distilled = "";
+      }
+
+      if (tabId === activeTabIdRef.current || activeTabIdRef.current === null) {
+        if (activeTabIdRef.current === null) setActiveTabId(tabId);
+        bump();
+        if (isNewContent && modeRef.current !== "original" && newContent) {
+          processWithLLMRef.current(newContent, modeRef.current);
+        }
+      }
+    });
+  }
 
   function switchToTab(tabId: number) {
     saveCurrentLlm();
@@ -95,7 +187,7 @@ export default function App() {
     const t = getTab(tabId);
 
     if (!t.original) {
-      chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION", windowId: windowIdRef.current });
+      requestExtractionForTab(tabId);
       return;
     }
 
@@ -108,6 +200,7 @@ export default function App() {
       }
     }
   }
+  switchToTabRef.current = switchToTab;
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -128,68 +221,75 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    chrome.windows.getCurrent((w) => {
-      windowIdRef.current = w.id;
-    });
-
-    const handler = (message: { type: string; tabId?: number; windowId?: number; data?: unknown }, sender: { tab?: { id?: number; windowId?: number } }) => {
-      if (message.type === "CONTENT_EXTRACTED" && message.tabId !== undefined) {
-        if (message.windowId !== undefined && message.windowId !== windowIdRef.current) return;
-        const data = message.data as ExtractedContent;
-        const t = getTab(message.tabId);
-        const isNewContent = t.original !== data.content;
-        t.original = data.content;
-        t.title = data.title;
-        if (isNewContent) {
-          t.selectedText = "";
-          t.executive = "";
-          t.distilled = "";
-        }
-
-        if (message.tabId === activeTabId || activeTabId === null) {
-          if (activeTabId === null) setActiveTabId(message.tabId);
-          bump();
-          if (isNewContent && mode !== "original" && data.content) {
-            processWithLLM(data.content, mode);
-          }
-        }
-      } else if (message.type === "ACTIVE_TAB_CHANGED" && message.tabId !== undefined) {
-        if (message.windowId !== undefined && message.windowId !== windowIdRef.current) return;
-        switchToTab(message.tabId);
+    const handler = (message: { type: string; tabId?: number; windowId?: number; data?: unknown }, _sender: { tab?: { id?: number; windowId?: number } }) => {
+      if (message.type === "ACTIVE_TAB_CHANGED" && message.tabId != null) {
+        switchToTabRef.current(message.tabId);
+      } else if (message.type === "NAVIGATION_OCCURRED" && message.tabId != null) {
+        const navTabId = message.tabId;
+        const existing = navigationDebounceRef.current.get(navTabId);
+        if (existing) clearTimeout(existing);
+        const timer = setTimeout(() => {
+          navigationDebounceRef.current.delete(navTabId);
+          requestExtractionForTab(navTabId);
+        }, 300);
+        navigationDebounceRef.current.set(navTabId, timer);
       } else if (message.type === "SELECTION_DETECTED") {
-        if (sender.tab?.windowId !== undefined && sender.tab.windowId !== windowIdRef.current) return;
+        if (_sender.tab?.id !== activeTabIdRef.current) return;
         const data = message.data as { text: string; url: string };
-        if (activeTabId === null) return;
-        const t = getTab(activeTabId);
+        const t = getTab(activeTabIdRef.current!);
         t.selectedText = data.text;
         bump();
-        if (mode !== "original" && data.text) {
-          processWithLLM(data.text, mode);
+        if (modeRef.current !== "original" && data.text) {
+          processWithLLMRef.current(data.text, modeRef.current);
         }
       }
     };
 
     chrome.runtime.onMessage.addListener(handler);
     return () => chrome.runtime.onMessage.removeListener(handler);
-  }, [mode, activeTabId, processWithLLM]);
+  }, []);
 
   useEffect(() => {
+    console.log("[Reader] Sidepanel mounted, querying active tab...");
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+      const tabId = tabs[0]?.id;
+      if (!tabId) {
+        console.warn("[Reader] No active tab found");
+        return;
+      }
+      console.log("[Reader] Active tab:", tabId);
+      setActiveTabId(tabId);
+      requestExtractionForTab(tabId);
+    });
+
     const port = chrome.runtime.connect({ name: "sidepanel" });
-    chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION", windowId: windowIdRef.current });
     let disconnected = false;
 
     port.onDisconnect.addListener(() => {
       if (disconnected) return;
       disconnected = true;
       chrome.runtime.connect({ name: "sidepanel" });
-      chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION", windowId: windowIdRef.current });
-      setActiveTabId(null);
-      clearContent();
+      chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+        const tabId = tabs[0]?.id;
+        if (tabId) {
+          setActiveTabId(null);
+          clearContent();
+        }
+      });
     });
+
+    const onUpdated = (tabId: number, changeInfo: { status?: string; url?: string }) => {
+      if (tabId === activeTabIdRef.current && changeInfo.status === "complete") {
+        console.log("[Reader] Tab", tabId, "completed loading — re-extracting");
+        requestExtractionForTab(tabId);
+      }
+    };
+    chrome.tabs.onUpdated.addListener(onUpdated);
 
     return () => {
       disconnected = true;
       port.disconnect();
+      chrome.tabs.onUpdated.removeListener(onUpdated);
     };
   }, []);
 
@@ -218,7 +318,9 @@ export default function App() {
     clearContent();
     tts.stop();
     bump();
-    chrome.runtime.sendMessage({ type: "REQUEST_EXTRACTION", windowId: windowIdRef.current });
+    if (activeTabId !== null) {
+      requestExtractionForTab(activeTabId);
+    }
   }, [activeTabId, clearContent, tts]);
 
   const handlePlayTTS = useCallback(() => {
