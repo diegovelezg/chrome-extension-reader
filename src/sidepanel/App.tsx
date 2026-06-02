@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useReducer } from "react";
 import { Mode, Settings, DEFAULT_SETTINGS, ExtractedContent } from "../types";
 import { useLLM } from "../lib/useLLM";
 import { useTTS } from "../lib/useTTS";
-import { BookOpen, CaseUpper, Copy, Minus, Plus, RefreshCw, Settings as SettingsIcon, TextSelect } from "lucide-react";
+import { BookOpen, CaseUpper, Copy, Loader2, Minus, Plus, RefreshCw, Settings as SettingsIcon, TextSelect } from "lucide-react";
 import { ModeSelector } from "../components/ModeSelector";
 import { Markdown } from "../components/Markdown";
 import { TTSControls } from "../components/TTSControls";
@@ -11,16 +11,28 @@ import { Button } from "../components/ui/button";
 import { Separator } from "../components/ui/separator";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
 
+interface TabAudio {
+  text: string;
+  isPlaying: boolean;
+  isLoading: boolean;
+  progress: number;
+  currentTime: number;
+  duration: number;
+  isFallback: boolean;
+  speed: number;
+}
+
 interface TabData {
   original: string;
   title: string;
   selectedText: string;
   executive: string;
   distilled: string;
+  audio: TabAudio | null;
 }
 
 function emptyTab(): TabData {
-  return { original: "", title: "", selectedText: "", executive: "", distilled: "" };
+  return { original: "", title: "", selectedText: "", executive: "", distilled: "", audio: null };
 }
 
 function hash(s: string): string {
@@ -87,12 +99,17 @@ export default function App() {
   modeRef.current = mode;
   const activeTabIdRef = useRef(activeTabId);
   activeTabIdRef.current = activeTabId;
-  const processWithLLMRef = useRef<(sourceContent: string, targetMode: Mode) => void>(null!);
+  const myWindowIdRef = useRef<number | null>(null);
+  const processWithLLMRef = useRef<(sourceContent: string, targetMode: Mode, tabId: number) => void>(null!);
   const switchToTabRef = useRef<(tabId: number) => void>(null!);
   const extractionInProgressRef = useRef<Set<number>>(new Set());
+  const pageLoadingRef = useRef<Set<number>>(new Set());
   const navigationDebounceRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
   const activeTab = activeTabId !== null ? tabsRef.current.get(activeTabId) : undefined;
+  const isExtracting = activeTabId !== null && extractionInProgressRef.current.has(activeTabId);
+  const isPageLoading = activeTabId !== null && pageLoadingRef.current.has(activeTabId);
+  const showLoading = !activeTab?.original && (isExtracting || isPageLoading);
 
   function getTab(tabId: number): TabData {
     let t = tabsRef.current.get(tabId);
@@ -109,7 +126,7 @@ export default function App() {
     t[mode] = streamedContent;
   }
 
-  const processWithLLM = useCallback((sourceContent: string, targetMode: Mode) => {
+  const processWithLLM = useCallback((sourceContent: string, targetMode: Mode, tabId: number) => {
     const prompt = targetMode === "executive"
       ? settings.promptExecutiveSummary.replace("{{content}}", sourceContent)
       : settings.promptDistilledSummary.replace("{{content}}", sourceContent);
@@ -118,19 +135,15 @@ export default function App() {
     const cached = llmCacheRef.current.get(key);
     if (cached !== undefined) {
       setLlmContent(cached);
-      if (activeTabId !== null) {
-        getTab(activeTabId)[targetMode] = cached;
-      }
+      getTab(tabId)[targetMode] = cached;
       return;
     }
 
     startStream(prompt, null, (result) => {
       llmCacheRef.current.set(key, result);
-      if (activeTabId !== null) {
-        getTab(activeTabId)[targetMode] = result;
-      }
+      getTab(tabId)[targetMode] = result;
     });
-  }, [settings, activeTabId, setLlmContent, startStream]);
+  }, [settings, setLlmContent, startStream]);
   processWithLLMRef.current = processWithLLM;
 
   function normalizeContent(s: string): string {
@@ -143,9 +156,11 @@ export default function App() {
       return;
     }
     extractionInProgressRef.current.add(tabId);
+    bump();
     console.log("[Reader] Extracting content from tab", tabId);
     extractFromTab(tabId).then((data) => {
       extractionInProgressRef.current.delete(tabId);
+      bump();
       if (!data) {
         console.warn("[Reader] Extraction returned no data for tab", tabId);
         return;
@@ -172,22 +187,36 @@ export default function App() {
         if (activeTabIdRef.current === null) setActiveTabId(tabId);
         bump();
         if (isNewContent && modeRef.current !== "original" && newContent) {
-          processWithLLMRef.current(newContent, modeRef.current);
+          processWithLLMRef.current(newContent, modeRef.current, tabId);
         }
       }
     });
   }
 
   function switchToTab(tabId: number) {
+    const prevTabId = activeTabId;
     saveCurrentLlm();
     clearContent();
+    if (prevTabId != null) tts.switchFromTab(prevTabId);
+    tts.switchToTab(tabId);
     setActiveTabId(tabId);
     bump();
 
     const t = getTab(tabId);
 
     if (!t.original) {
-      requestExtractionForTab(tabId);
+      chrome.tabs.get(tabId, (currentTab) => {
+        if (chrome.runtime.lastError) {
+          requestExtractionForTab(tabId);
+          return;
+        }
+        if (currentTab.status === "complete") {
+          requestExtractionForTab(tabId);
+        } else {
+          pageLoadingRef.current.add(tabId);
+          bump();
+        }
+      });
       return;
     }
 
@@ -196,7 +225,7 @@ export default function App() {
         setLlmContent(t[mode]);
       } else {
         const source = t.selectedText || t.original;
-        if (source) processWithLLM(source, mode);
+        if (source) processWithLLM(source, mode, tabId);
       }
     }
   }
@@ -214,6 +243,7 @@ export default function App() {
 
   useEffect(() => {
     chrome.storage.sync.get(null, (stored) => {
+      if (chrome.runtime.lastError) return;
       if (stored && Object.keys(stored).length > 0) {
         setSettings({ ...DEFAULT_SETTINGS, ...stored } as Settings);
       }
@@ -222,6 +252,10 @@ export default function App() {
 
   useEffect(() => {
     const handler = (message: { type: string; tabId?: number; windowId?: number; data?: unknown }, _sender: { tab?: { id?: number; windowId?: number } }) => {
+      // Ignorar mensajes de otras ventanas: este side panel solo responde a eventos de su propia ventana
+      if (myWindowIdRef.current != null && message.windowId != null && message.windowId !== myWindowIdRef.current) {
+        return;
+      }
       if (message.type === "ACTIVE_TAB_CHANGED" && message.tabId != null) {
         switchToTabRef.current(message.tabId);
       } else if (message.type === "NAVIGATION_OCCURRED" && message.tabId != null) {
@@ -236,11 +270,12 @@ export default function App() {
       } else if (message.type === "SELECTION_DETECTED") {
         if (_sender.tab?.id !== activeTabIdRef.current) return;
         const data = message.data as { text: string; url: string };
-        const t = getTab(activeTabIdRef.current!);
+        const senderTabId = activeTabIdRef.current!;
+        const t = getTab(senderTabId);
         t.selectedText = data.text;
         bump();
         if (modeRef.current !== "original" && data.text) {
-          processWithLLMRef.current(data.text, modeRef.current);
+          processWithLLMRef.current(data.text, modeRef.current, senderTabId);
         }
       }
     };
@@ -252,25 +287,47 @@ export default function App() {
   useEffect(() => {
     console.log("[Reader] Sidepanel mounted, querying active tab...");
     chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-      const tabId = tabs[0]?.id;
+      if (chrome.runtime.lastError) return;
+      const tab = tabs[0];
+      const tabId = tab?.id;
       if (!tabId) {
         console.warn("[Reader] No active tab found");
         return;
       }
-      console.log("[Reader] Active tab:", tabId);
+      myWindowIdRef.current = tab.windowId ?? null;
+      console.log("[Reader] Active tab:", tabId, "in window:", tab.windowId);
       setActiveTabId(tabId);
-      requestExtractionForTab(tabId);
+
+      chrome.tabs.get(tabId, (currentTab) => {
+        if (chrome.runtime.lastError) {
+          requestExtractionForTab(tabId);
+          return;
+        }
+        if (currentTab.status === "complete") {
+          requestExtractionForTab(tabId);
+        } else {
+          pageLoadingRef.current.add(tabId);
+          bump();
+        }
+      });
     });
 
-    const port = chrome.runtime.connect({ name: "sidepanel" });
+    let port: { disconnect: () => void; onDisconnect: { addListener: (cb: () => void) => void } };
+    try {
+      port = chrome.runtime.connect({ name: "sidepanel" });
+    } catch {
+      port = { disconnect: () => {}, onDisconnect: { addListener: () => {} } };
+    }
     let disconnected = false;
 
     port.onDisconnect.addListener(() => {
       if (disconnected) return;
       disconnected = true;
-      chrome.runtime.connect({ name: "sidepanel" });
+      try { chrome.runtime.connect({ name: "sidepanel" }); } catch { /* no listener */ }
       chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-        const tabId = tabs[0]?.id;
+        if (chrome.runtime.lastError) return;
+        const tab = tabs[0];
+        const tabId = tab?.id;
         if (tabId) {
           setActiveTabId(null);
           clearContent();
@@ -278,7 +335,11 @@ export default function App() {
       });
     });
 
-    const onUpdated = (tabId: number, changeInfo: { status?: string; url?: string }) => {
+    const onUpdated = (tabId: number, changeInfo: { status?: string; url?: string }, tab: { windowId?: number } | undefined) => {
+      if (myWindowIdRef.current != null && tab?.windowId != null && tab.windowId !== myWindowIdRef.current) return;
+      if (changeInfo.status === "complete" && pageLoadingRef.current.delete(tabId)) {
+        bump();
+      }
       if (tabId === activeTabIdRef.current && changeInfo.status === "complete") {
         console.log("[Reader] Tab", tabId, "completed loading — re-extracting");
         requestExtractionForTab(tabId);
@@ -307,7 +368,7 @@ export default function App() {
       setLlmContent(t[newMode]);
     } else {
       const source = t.selectedText || t.original;
-      if (source) processWithLLM(source, newMode);
+      if (source) processWithLLM(source, newMode, activeTabId);
     }
   }, [activeTabId, clearContent, tts, setLlmContent, processWithLLM]);
 
@@ -325,8 +386,8 @@ export default function App() {
 
   const handlePlayTTS = useCallback(() => {
     const text = streamedContent || activeTab?.selectedText || activeTab?.original || "";
-    if (text) tts.play(text);
-  }, [streamedContent, activeTab, tts]);
+    if (text && activeTabId !== null) tts.play(text, activeTabId);
+  }, [streamedContent, activeTab, activeTabId, tts]);
 
   const handleSettingsSave = useCallback((newSettings: Settings) => {
     setSettings(newSettings);
@@ -418,6 +479,11 @@ export default function App() {
             onSave={handleSettingsSave}
             onClose={() => setShowSettings(false)}
           />
+        ) : !displayContent && showLoading ? (
+          <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground">
+            <Loader2 className="size-12 mb-4 text-muted-foreground/50 animate-spin" />
+            <p className="text-sm text-center">Extrayendo contenido...</p>
+          </div>
         ) : !displayContent ? (
           <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground">
             <BookOpen className="size-16 mb-4 text-muted-foreground/50" />

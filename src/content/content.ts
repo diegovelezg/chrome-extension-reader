@@ -55,9 +55,37 @@ document.addEventListener("mouseup", () => {
   setTimeout(handleSelection, 100);
 });
 
+function waitForDOMStability(timeout = 3000, stabilityThreshold = 500): Promise<void> {
+  return new Promise((resolve) => {
+    let stabilityTimer: ReturnType<typeof setTimeout>;
+    const maxTimer = setTimeout(() => {
+      observer.disconnect();
+      clearTimeout(stabilityTimer);
+      resolve();
+    }, timeout);
+
+    const observer = new MutationObserver(() => {
+      clearTimeout(stabilityTimer);
+      stabilityTimer = setTimeout(() => {
+        observer.disconnect();
+        clearTimeout(maxTimer);
+        resolve();
+      }, stabilityThreshold);
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    stabilityTimer = setTimeout(() => {
+      observer.disconnect();
+      clearTimeout(maxTimer);
+      resolve();
+    }, stabilityThreshold);
+  });
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "REQUEST_EXTRACTION") {
-    extractContent().then((result) => {
+    waitForDOMStability().then(() => extractContent()).then((result) => {
       sendResponse({ type: "CONTENT_EXTRACTED", data: result });
     });
     return true;
