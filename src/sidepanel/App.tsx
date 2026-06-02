@@ -45,37 +45,47 @@ function hash(s: string): string {
 
 function extractFromTab(tabId: number): Promise<ExtractedContent | null> {
   return new Promise((resolve) => {
+    let settled = false;
+    const done = (value: ExtractedContent | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
+    const timer = setTimeout(() => done(null), 8000);
+
     chrome.tabs.sendMessage(tabId, { type: "REQUEST_EXTRACTION" }, (response: unknown) => {
-    if (chrome.runtime.lastError) {
-      chrome.scripting.executeScript({ target: { tabId }, files: [CONTENT_SCRIPT_PATH] }, () => {
-        if (chrome.runtime.lastError) {
-          resolve(null);
-          return;
-        }
-        setTimeout(() => {
-          chrome.tabs.sendMessage(tabId, { type: "REQUEST_EXTRACTION" }, (resp: unknown) => {
-            if (chrome.runtime.lastError) {
-              resolve(null);
-              return;
-            }
-            const r = resp as { type?: string; data?: unknown } | undefined;
-            if (r?.type === "CONTENT_EXTRACTED") {
-              resolve(r.data as ExtractedContent);
-            } else {
-              resolve(null);
-            }
-          });
-        }, 300);
-      });
-      return;
-    }
-    const r = response as { type?: string; data?: unknown } | undefined;
-    if (r?.type === "CONTENT_EXTRACTED") {
-      resolve(r.data as ExtractedContent);
-    } else {
-      resolve(null);
-    }
-  });
+      if (settled) return;
+      clearTimeout(timer);
+      if (chrome.runtime.lastError) {
+        chrome.scripting.executeScript({ target: { tabId }, files: [CONTENT_SCRIPT_PATH] }, () => {
+          if (chrome.runtime.lastError) {
+            done(null);
+            return;
+          }
+          const fallbackTimer = setTimeout(() => done(null), 8000);
+          setTimeout(() => {
+            chrome.tabs.sendMessage(tabId, { type: "REQUEST_EXTRACTION" }, (resp: unknown) => {
+              clearTimeout(fallbackTimer);
+              if (settled) return;
+              const r = resp as { type?: string; data?: unknown } | undefined;
+              if (r?.type === "CONTENT_EXTRACTED") {
+                done(r.data as ExtractedContent);
+              } else {
+                done(null);
+              }
+            });
+          }, 300);
+        });
+        return;
+      }
+      const r = response as { type?: string; data?: unknown } | undefined;
+      if (r?.type === "CONTENT_EXTRACTED") {
+        done(r.data as ExtractedContent);
+      } else {
+        done(null);
+      }
+    });
   });
 }
 
@@ -170,7 +180,6 @@ export default function App() {
           return;
         }
         extractionInProgressRef.current.delete(tabId);
-        bump();
         const newContent = data.content || "";
         const t = getTab(tabId);
 
@@ -225,7 +234,7 @@ export default function App() {
           return;
         }
         const url = currentTab.url || "";
-        if (!isSupportedUrl(url)) return;
+        if (url && !isSupportedUrl(url)) return;
         if (currentTab.status === "complete") {
           requestExtractionForTab(tabId);
         } else {
@@ -293,7 +302,7 @@ export default function App() {
           return;
         }
         const url = currentTab.url || "";
-        if (!isSupportedUrl(url)) return;
+        if (url && !isSupportedUrl(url)) return;
         if (currentTab.status === "complete") {
           requestExtractionForTab(tabId);
         } else {
@@ -345,7 +354,7 @@ export default function App() {
       }
       if (changeInfo.status === "complete" && tabId === activeTabIdRef.current) {
         const url = tab?.url || "";
-        if (!isSupportedUrl(url)) return;
+        if (url && !isSupportedUrl(url)) return;
         requestExtractionForTab(tabId);
       }
     };

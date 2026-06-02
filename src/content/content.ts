@@ -88,7 +88,7 @@ function waitForDocumentReady(): Promise<void> {
   });
 }
 
-function waitForReadableContent(timeout = 10000, interval = 1000): Promise<void> {
+function waitForReadableContent(timeout = 3000, interval = 500): Promise<void> {
   const check = () => {
     try {
       return isProbablyReaderable(document, { minContentLength: 140, minScore: 20 });
@@ -110,13 +110,21 @@ function waitForReadableContent(timeout = 10000, interval = 1000): Promise<void>
   });
 }
 
+let extracting = false;
+
 if (isContextValid()) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === "REQUEST_EXTRACTION") {
+      if (extracting) {
+        sendResponse({ type: "CONTENT_EXTRACTED", data: { title: "", content: "", url: "" } });
+        return false;
+      }
+      extracting = true;
       waitForDocumentReady()
         .then(() => waitForReadableContent())
         .then(() => extractContent())
         .then((result) => {
+          extracting = false;
           try {
             sendResponse({ type: "CONTENT_EXTRACTED", data: result });
           } catch {
@@ -124,6 +132,7 @@ if (isContextValid()) {
           }
         })
         .catch(() => {
+          extracting = false;
           try {
             sendResponse({ type: "CONTENT_EXTRACTED", data: { title: "", content: "", url: "" } });
           } catch {

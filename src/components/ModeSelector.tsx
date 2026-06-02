@@ -1,4 +1,4 @@
-import { BarChart3, PencilLine, FileText } from "lucide-react";
+import { List, FlaskConical, FileText } from "lucide-react";
 import { Mode } from "../types";
 
 interface ModeSelectorProps {
@@ -6,9 +6,9 @@ interface ModeSelectorProps {
   onModeChange: (mode: Mode) => void;
 }
 
-const modeIcons: Record<Mode, typeof BarChart3> = {
-  executive: BarChart3,
-  distilled: PencilLine,
+const modeIcons: Record<Mode, typeof List> = {
+  executive: List,
+  distilled: FlaskConical,
   original: FileText,
 };
 

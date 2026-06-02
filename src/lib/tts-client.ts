@@ -21,11 +21,16 @@ export class TTSClient {
     const { ttsEndpoint, ttsVoice } = this.settings;
     const { input, voice, speed = 1.0 } = options;
 
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.settings.ttsApiKey) {
+      headers["Authorization"] = `Bearer ${this.settings.ttsApiKey}`;
+    }
+
     const response = await fetch(`${ttsEndpoint}/v1/audio/speech`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify({
         model: "tts-1",
         input,

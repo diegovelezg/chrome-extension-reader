@@ -3,6 +3,7 @@ export interface Settings {
   llmApiKey: string;
   llmModel: string;
   ttsEndpoint: string;
+  ttsApiKey: string;
   ttsVoice: string;
   fontSize: number;
   lineHeight: number;
@@ -15,6 +16,7 @@ export const DEFAULT_SETTINGS: Settings = {
   llmApiKey: "",
   llmModel: "llama3",
   ttsEndpoint: "http://localhost:8020",
+  ttsApiKey: "",
   ttsVoice: "default",
   fontSize: 16,
   lineHeight: 1.6,
