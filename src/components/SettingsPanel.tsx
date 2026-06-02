@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Settings, DEFAULT_SETTINGS } from "../types";
+import { ArrowLeft, Cpu, FileText, Volume2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
@@ -27,26 +28,30 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
   };
 
   return (
-    <div className="bg-background border rounded-lg shadow-sm w-full max-w-2xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b">
-        <h2 className="text-lg font-semibold">Settings</h2>
+    <div className="max-w-2xl mx-auto">
+      {/* Top nav */}
+      <div className="flex items-center gap-2 py-2">
         <button
           onClick={onClose}
-          className="text-muted-foreground hover:text-foreground"
+          className="cursor-pointer text-muted-foreground hover:text-foreground"
+          aria-label="Back"
         >
-          ✕
+          <ArrowLeft className="size-4" />
         </button>
+        <h2 className="text-lg font-semibold">Settings</h2>
       </div>
 
       {/* Form */}
-      <div className="p-4 space-y-6">
+      <div className="pb-4 space-y-4">
           {/* LLM Section */}
-          <div className="space-y-4">
-            <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-              LLM Configuration
-            </h3>
-            
+          <section className="rounded-lg border bg-card p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <Cpu className="size-4 text-muted-foreground" />
+              <h3 className="text-sm font-semibold text-foreground">
+                LLM Configuration
+              </h3>
+            </div>
+
             <div className="space-y-3">
               <div>
                 <label className="text-sm font-medium block mb-1">Endpoint URL</label>
@@ -76,14 +81,17 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 />
               </div>
             </div>
-          </div>
+          </section>
 
           {/* TTS Section */}
-          <div className="space-y-4">
-            <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-              TTS Configuration
-            </h3>
-            
+          <section className="rounded-lg border bg-card p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <Volume2 className="size-4 text-muted-foreground" />
+              <h3 className="text-sm font-semibold text-foreground">
+                TTS Configuration
+              </h3>
+            </div>
+
             <div className="space-y-3">
               <div>
                 <label className="text-sm font-medium block mb-1">Endpoint URL</label>
@@ -103,14 +111,17 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 />
               </div>
             </div>
-          </div>
+          </section>
 
           {/* Prompts Section */}
-          <div className="space-y-4">
-            <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-              Prompts
-            </h3>
-            
+          <section className="rounded-lg border bg-card p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <FileText className="size-4 text-muted-foreground" />
+              <h3 className="text-sm font-semibold text-foreground">
+                Prompts
+              </h3>
+            </div>
+
             <div className="space-y-3">
               <div>
                 <label className="text-sm font-medium block mb-1">
@@ -139,11 +150,11 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 />
               </div>
             </div>
-          </div>
+          </section>
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between p-4 border-t bg-muted/50">
+        {/* Action buttons (floating) */}
+        <div className="flex items-center justify-between p-4">
           <Button variant="outline" onClick={handleReset}>
             Reset to Defaults
           </Button>
