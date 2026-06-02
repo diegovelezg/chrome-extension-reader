@@ -45,7 +45,6 @@ export class LLMClient {
           model: llmModel,
           messages,
           stream: true,
-          reasoning_effort: "none",
         }),
         signal,
       });

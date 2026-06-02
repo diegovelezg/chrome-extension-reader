@@ -1,4 +1,4 @@
-import { Readability } from "@mozilla/readability";
+import { Readability, isProbablyReaderable } from "@mozilla/readability";
 
 async function extractContent(): Promise<{ title: string; content: string; url: string }> {
   const title = document.title || "";
@@ -33,7 +33,13 @@ async function extractContent(): Promise<{ title: string; content: string; url: 
   }
 
   content = content.replace(/[\u{1F000}-\u{1FFFF}]|[\u{2600}-\u{27BF}]|[\u{FE00}-\u{FE0F}]|[\u{1F900}-\u{1F9FF}]|[\u{1FA00}-\u{1FA6F}]|[\u{1FA70}-\u{1FAFF}]|[\u{2702}-\u{27B0}]|[\u{24C2}-\u{1F251}]|\u{200D}|\u{FE0F}/gu, "");
-  content = content.replace(/\s+/g, " ").split("\n").filter(l => l.trim().length > 20 || l.trim().length === 0).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  content = content
+    .split("\n")
+    .map(l => l.replace(/\s+/g, " ").trim())
+    .filter(l => l.length === 0 || l.length > 20)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 
   return { title, content, url };
 }
@@ -75,44 +81,55 @@ if (isContextValid()) {
   });
 }
 
-function waitForDOMStability(timeout = 3000, stabilityThreshold = 500): Promise<void> {
+function waitForDocumentReady(): Promise<void> {
+  if (document.readyState === "complete") return Promise.resolve();
   return new Promise((resolve) => {
-    let stabilityTimer: ReturnType<typeof setTimeout>;
-    const maxTimer = setTimeout(() => {
-      observer.disconnect();
-      clearTimeout(stabilityTimer);
-      resolve();
-    }, timeout);
+    window.addEventListener("load", () => resolve(), { once: true });
+  });
+}
 
-    const observer = new MutationObserver(() => {
-      clearTimeout(stabilityTimer);
-      stabilityTimer = setTimeout(() => {
-        observer.disconnect();
-        clearTimeout(maxTimer);
+function waitForReadableContent(timeout = 10000, interval = 1000): Promise<void> {
+  const check = () => {
+    try {
+      return isProbablyReaderable(document, { minContentLength: 140, minScore: 20 });
+    } catch {
+      return false;
+    }
+  };
+
+  if (check()) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    const deadline = Date.now() + timeout;
+    const timer = setInterval(() => {
+      if (check() || Date.now() >= deadline) {
+        clearInterval(timer);
         resolve();
-      }, stabilityThreshold);
-    });
-
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    stabilityTimer = setTimeout(() => {
-      observer.disconnect();
-      clearTimeout(maxTimer);
-      resolve();
-    }, stabilityThreshold);
+      }
+    }, interval);
   });
 }
 
 if (isContextValid()) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === "REQUEST_EXTRACTION") {
-      waitForDOMStability().then(() => extractContent()).then((result) => {
-        try {
-          sendResponse({ type: "CONTENT_EXTRACTED", data: result });
-        } catch {
-          // Extension context invalidated; ignore.
-        }
-      });
+      waitForDocumentReady()
+        .then(() => waitForReadableContent())
+        .then(() => extractContent())
+        .then((result) => {
+          try {
+            sendResponse({ type: "CONTENT_EXTRACTED", data: result });
+          } catch {
+            // Extension context invalidated; ignore.
+          }
+        })
+        .catch(() => {
+          try {
+            sendResponse({ type: "CONTENT_EXTRACTED", data: { title: "", content: "", url: "" } });
+          } catch {
+            // Extension context invalidated; ignore.
+          }
+        });
       return true;
     }
     return false;

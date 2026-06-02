@@ -4,6 +4,7 @@ import { Slider } from "../components/ui/slider";
 interface TTSControlsProps {
   isPlaying: boolean;
   isLoading: boolean;
+  isPaused: boolean;
   progress: number;
   speed: number;
   error: string | null;
@@ -18,6 +19,7 @@ interface TTSControlsProps {
 export function TTSControls({
   isPlaying,
   isLoading,
+  isPaused,
   progress,
   speed,
   error,
@@ -38,7 +40,7 @@ export function TTSControls({
       )}
 
       <div className="flex items-center gap-2">
-        {!isPlaying ? (
+        {!isPlaying && !isPaused ? (
           <button
             onClick={onPlay}
             disabled={isLoading}
@@ -46,18 +48,25 @@ export function TTSControls({
           >
             <Play className="size-5 fill-current" />
           </button>
-        ) : (
+        ) : isPlaying ? (
           <button
-            onClick={isPlaying ? onPause : onResume}
+            onClick={onPause}
             className="flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
           >
             <Pause className="size-5 fill-current" />
+          </button>
+        ) : (
+          <button
+            onClick={onResume}
+            className="flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            <Play className="size-5 fill-current" />
           </button>
         )}
 
         <button
           onClick={onStop}
-          disabled={!isPlaying}
+          disabled={!isPlaying && !isPaused}
           className="flex items-center justify-center w-10 h-10 rounded-full bg-muted hover:bg-muted/80 disabled:opacity-50"
         >
           <Square className="size-4 fill-current" />

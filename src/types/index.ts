@@ -32,10 +32,4 @@ export interface ExtractedContent {
   url: string;
 }
 
-export type MessageType =
-  | { type: "CONTENT_EXTRACTED"; tabId: number; data: ExtractedContent }
-  | { type: "ACTIVE_TAB_CHANGED"; tabId: number; windowId: number }
-  | { type: "SELECTION_DETECTED"; data: { text: string; url: string } }
-  | { type: "REQUEST_EXTRACTION" }
-  | { type: "GET_SETTINGS"; data: Settings }
-  | { type: "SAVE_SETTINGS"; data: Settings };
+export const CONTENT_SCRIPT_PATH = "src/content/content.js";

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useReducer } from "react";
-import { Mode, Settings, DEFAULT_SETTINGS, ExtractedContent } from "../types";
+import { Mode, Settings, DEFAULT_SETTINGS, ExtractedContent, CONTENT_SCRIPT_PATH } from "../types";
 import { useLLM } from "../lib/useLLM";
 import { useTTS } from "../lib/useTTS";
+import { isSupportedUrl } from "../lib/utils";
 import { BookOpen, CaseUpper, Copy, Loader2, Minus, Plus, RefreshCw, Settings as SettingsIcon, TextSelect } from "lucide-react";
 import { ModeSelector } from "../components/ModeSelector";
 import { Markdown } from "../components/Markdown";
@@ -47,17 +48,14 @@ function extractFromTab(tabId: number): Promise<ExtractedContent | null> {
   return new Promise((resolve) => {
     chrome.tabs.sendMessage(tabId, { type: "REQUEST_EXTRACTION" }, (response: unknown) => {
     if (chrome.runtime.lastError) {
-      console.warn("[Reader] Content script not ready, injecting...", chrome.runtime.lastError.message);
-      chrome.scripting.executeScript({ target: { tabId }, files: ["src/content/content.js"] }, () => {
+      chrome.scripting.executeScript({ target: { tabId }, files: [CONTENT_SCRIPT_PATH] }, () => {
         if (chrome.runtime.lastError) {
-          console.error("[Reader] Script injection failed:", chrome.runtime.lastError.message);
           resolve(null);
           return;
         }
         setTimeout(() => {
           chrome.tabs.sendMessage(tabId, { type: "REQUEST_EXTRACTION" }, (resp: unknown) => {
             if (chrome.runtime.lastError) {
-              console.error("[Reader] Extraction after injection failed:", chrome.runtime.lastError.message);
               resolve(null);
               return;
             }
@@ -156,6 +154,12 @@ export default function App() {
       return;
     }
     extractionInProgressRef.current.add(tabId);
+    if (tabId === activeTabIdRef.current) {
+      const t = getTab(tabId);
+      t.original = "";
+      t.title = "";
+      clearContent();
+    }
     bump();
     console.log("[Reader] Extracting content from tab", tabId);
 
@@ -200,6 +204,17 @@ export default function App() {
     attempt(2);
   }
 
+  function loadModeContent(tabId: number, targetMode: Mode) {
+    if (targetMode === "original") return;
+    const t = getTab(tabId);
+    if (t[targetMode]) {
+      setLlmContent(t[targetMode]);
+    } else {
+      const source = t.selectedText || t.original;
+      if (source) processWithLLM(source, targetMode, tabId);
+    }
+  }
+
   function switchToTab(tabId: number) {
     const prevTabId = activeTabId;
     saveCurrentLlm();
@@ -218,7 +233,7 @@ export default function App() {
           return;
         }
         const url = currentTab.url || "";
-        if (!url.startsWith("http://") && !url.startsWith("https://") && !url.startsWith("file://")) return;
+        if (!isSupportedUrl(url)) return;
         if (currentTab.status === "complete") {
           requestExtractionForTab(tabId);
         } else {
@@ -229,14 +244,7 @@ export default function App() {
       return;
     }
 
-    if (mode !== "original") {
-      if (t[mode]) {
-        setLlmContent(t[mode]);
-      } else {
-        const source = t.selectedText || t.original;
-        if (source) processWithLLM(source, mode, tabId);
-      }
-    }
+    loadModeContent(tabId, mode);
   }
   switchToTabRef.current = switchToTab;
 
@@ -298,7 +306,7 @@ export default function App() {
           return;
         }
         const url = currentTab.url || "";
-        if (!url.startsWith("http://") && !url.startsWith("https://") && !url.startsWith("file://")) return;
+        if (!isSupportedUrl(url)) return;
         if (currentTab.status === "complete") {
           requestExtractionForTab(tabId);
         } else {
@@ -334,8 +342,12 @@ export default function App() {
       if (existing) clearTimeout(existing);
       const timer = setTimeout(() => {
         navigationDebounceRef.current.delete(tabId);
-        requestExtractionForTab(tabId);
-      }, 300);
+        chrome.tabs.get(tabId, (tab) => {
+          if (chrome.runtime.lastError) return;
+          if (myWindowIdRef.current != null && tab.windowId !== myWindowIdRef.current) return;
+          requestExtractionForTab(tabId);
+        });
+      }, 100);
       navigationDebounceRef.current.set(tabId, timer);
     };
 
@@ -346,7 +358,7 @@ export default function App() {
       }
       if (changeInfo.status === "complete" && tabId === activeTabIdRef.current) {
         const url = tab?.url || "";
-        if (!url.startsWith("http://") && !url.startsWith("https://") && !url.startsWith("file://")) return;
+        if (!isSupportedUrl(url)) return;
         console.log("[Reader] Tab", tabId, "completed loading — re-extracting");
         requestExtractionForTab(tabId);
       }
@@ -361,7 +373,8 @@ export default function App() {
 
     const onWebNav = (details: { tabId: number; frameId: number; url: string }) => {
       if (details.frameId !== 0) return;
-      if (!details.url.startsWith("http://") && !details.url.startsWith("https://") && !details.url.startsWith("file://")) return;
+      if (!isSupportedUrl(details.url)) return;
+      if (activeTabIdRef.current != null && details.tabId !== activeTabIdRef.current) return;
       handleNavigation(details.tabId);
     };
     if (chrome.webNavigation) {
@@ -390,16 +403,8 @@ export default function App() {
     setMode(newMode);
 
     if (newMode === "original" || activeTabId === null) return;
-
-    const t = getTab(activeTabId);
-
-    if (t[newMode]) {
-      setLlmContent(t[newMode]);
-    } else {
-      const source = t.selectedText || t.original;
-      if (source) processWithLLM(source, newMode, activeTabId);
-    }
-  }, [activeTabId, clearContent, tts, setLlmContent, processWithLLM]);
+    loadModeContent(activeTabId, newMode);
+  }, [activeTabId, clearContent, tts]);
 
   const handleReextract = useCallback(() => {
     if (activeTabId !== null) {
@@ -560,6 +565,7 @@ export default function App() {
             <TTSControls
               isPlaying={tts.isPlaying}
               isLoading={tts.isLoading}
+              isPaused={tts.isPaused}
               progress={tts.progress}
               speed={tts.speed}
               error={tts.error}

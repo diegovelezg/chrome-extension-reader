@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { LLMClient, StreamCallback, createLLMClient } from "./llm-client";
 import { Settings } from "../types";
 
@@ -18,12 +18,13 @@ export function useLLM(settings: Settings) {
   const clientRef = useRef<LLMClient | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Initialize or update client when settings change
-  if (!clientRef.current) {
-    clientRef.current = createLLMClient(settings);
-  } else {
-    clientRef.current.updateSettings(settings);
-  }
+  useEffect(() => {
+    if (!clientRef.current) {
+      clientRef.current = createLLMClient(settings);
+    } else {
+      clientRef.current.updateSettings(settings);
+    }
+  }, [settings]);
 
   const startStream = useCallback(
     (prompt: string, systemPrompt: string | null, onComplete?: (content: string) => void) => {

@@ -58,7 +58,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 <Input
                   value={formData.llmEndpoint}
                   onChange={(e) => handleChange("llmEndpoint", e.target.value)}
-                  placeholder="http://localhost:11434"
+                  placeholder={DEFAULT_SETTINGS.llmEndpoint}
                 />
               </div>
 
@@ -77,7 +77,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 <Input
                   value={formData.llmModel}
                   onChange={(e) => handleChange("llmModel", e.target.value)}
-                  placeholder="llama3"
+                  placeholder={DEFAULT_SETTINGS.llmModel}
                 />
               </div>
             </div>
@@ -98,7 +98,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 <Input
                   value={formData.ttsEndpoint}
                   onChange={(e) => handleChange("ttsEndpoint", e.target.value)}
-                  placeholder="http://localhost:8020"
+                  placeholder={DEFAULT_SETTINGS.ttsEndpoint}
                 />
               </div>
 
@@ -107,7 +107,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 <Input
                   value={formData.ttsVoice}
                   onChange={(e) => handleChange("ttsVoice", e.target.value)}
-                  placeholder="default"
+                  placeholder={DEFAULT_SETTINGS.ttsVoice}
                 />
               </div>
             </div>
