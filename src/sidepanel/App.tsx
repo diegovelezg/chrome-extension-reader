@@ -412,7 +412,13 @@ export default function App() {
       </TooltipProvider>
 
       <div className="flex-1 overflow-auto p-4">
-        {!displayContent ? (
+        {showSettings ? (
+          <SettingsPanel
+            settings={settings}
+            onSave={handleSettingsSave}
+            onClose={() => setShowSettings(false)}
+          />
+        ) : !displayContent ? (
           <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground">
             <BookOpen className="size-16 mb-4 text-muted-foreground/50" />
             <p className="text-sm text-center">Navigate to a page and click the extension icon</p>
@@ -471,14 +477,6 @@ export default function App() {
             />
           </div>
         </>
-      )}
-
-      {showSettings && (
-        <SettingsPanel
-          settings={settings}
-          onSave={handleSettingsSave}
-          onClose={() => setShowSettings(false)}
-        />
       )}
     </div>
   );

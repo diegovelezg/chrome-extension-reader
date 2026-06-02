@@ -27,21 +27,20 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
   };
 
   return (
-    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-background border rounded-lg shadow-lg w-full max-w-md max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b">
-          <h2 className="text-lg font-semibold">Settings</h2>
-          <button
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            ✕
-          </button>
-        </div>
+    <div className="bg-background border rounded-lg shadow-sm w-full max-w-2xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 border-b">
+        <h2 className="text-lg font-semibold">Settings</h2>
+        <button
+          onClick={onClose}
+          className="text-muted-foreground hover:text-foreground"
+        >
+          ✕
+        </button>
+      </div>
 
-        {/* Form */}
-        <div className="p-4 space-y-6">
+      {/* Form */}
+      <div className="p-4 space-y-6">
           {/* LLM Section */}
           <div className="space-y-4">
             <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
@@ -157,7 +156,6 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
             </Button>
           </div>
         </div>
-      </div>
     </div>
   );
 }
