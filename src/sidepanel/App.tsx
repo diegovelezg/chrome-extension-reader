@@ -46,39 +46,39 @@ function hash(s: string): string {
 function extractFromTab(tabId: number): Promise<ExtractedContent | null> {
   return new Promise((resolve) => {
     chrome.tabs.sendMessage(tabId, { type: "REQUEST_EXTRACTION" }, (response: unknown) => {
-      if (chrome.runtime.lastError) {
-        console.warn("[Reader] Content script not ready, injecting...", chrome.runtime.lastError.message);
-        chrome.scripting.executeScript({ target: { tabId }, files: ["src/content/content.js"] }, () => {
-          if (chrome.runtime.lastError) {
-            console.error("[Reader] Script injection failed:", chrome.runtime.lastError.message);
-            resolve(null);
-            return;
-          }
-          setTimeout(() => {
-            chrome.tabs.sendMessage(tabId, { type: "REQUEST_EXTRACTION" }, (resp: unknown) => {
-              if (chrome.runtime.lastError) {
-                console.error("[Reader] Extraction after injection failed:", chrome.runtime.lastError.message);
-                resolve(null);
-                return;
-              }
-              const r = resp as { type?: string; data?: unknown } | undefined;
-              if (r?.type === "CONTENT_EXTRACTED") {
-                resolve(r.data as ExtractedContent);
-              } else {
-                resolve(null);
-              }
-            });
-          }, 300);
-        });
-        return;
-      }
-      const r = response as { type?: string; data?: unknown } | undefined;
-      if (r?.type === "CONTENT_EXTRACTED") {
-        resolve(r.data as ExtractedContent);
-      } else {
-        resolve(null);
-      }
-    });
+    if (chrome.runtime.lastError) {
+      console.warn("[Reader] Content script not ready, injecting...", chrome.runtime.lastError.message);
+      chrome.scripting.executeScript({ target: { tabId }, files: ["src/content/content.js"] }, () => {
+        if (chrome.runtime.lastError) {
+          console.error("[Reader] Script injection failed:", chrome.runtime.lastError.message);
+          resolve(null);
+          return;
+        }
+        setTimeout(() => {
+          chrome.tabs.sendMessage(tabId, { type: "REQUEST_EXTRACTION" }, (resp: unknown) => {
+            if (chrome.runtime.lastError) {
+              console.error("[Reader] Extraction after injection failed:", chrome.runtime.lastError.message);
+              resolve(null);
+              return;
+            }
+            const r = resp as { type?: string; data?: unknown } | undefined;
+            if (r?.type === "CONTENT_EXTRACTED") {
+              resolve(r.data as ExtractedContent);
+            } else {
+              resolve(null);
+            }
+          });
+        }, 300);
+      });
+      return;
+    }
+    const r = response as { type?: string; data?: unknown } | undefined;
+    if (r?.type === "CONTENT_EXTRACTED") {
+      resolve(r.data as ExtractedContent);
+    } else {
+      resolve(null);
+    }
+  });
   });
 }
 
@@ -158,39 +158,46 @@ export default function App() {
     extractionInProgressRef.current.add(tabId);
     bump();
     console.log("[Reader] Extracting content from tab", tabId);
-    extractFromTab(tabId).then((data) => {
-      extractionInProgressRef.current.delete(tabId);
-      bump();
-      if (!data) {
-        console.warn("[Reader] Extraction returned no data for tab", tabId);
-        return;
-      }
-      const newContent = data.content || "";
-      console.log("[Reader] Content extracted:", data.title, newContent.length, "chars");
-      const t = getTab(tabId);
 
-      if (newContent.length < 50 && t.original.length > 200) {
-        console.log("[Reader] New content too short, keeping existing content");
-        return;
-      }
-
-      const isNewContent = normalizeContent(t.original) !== normalizeContent(newContent);
-      t.original = newContent;
-      t.title = data.title;
-      if (isNewContent) {
-        t.selectedText = "";
-        t.executive = "";
-        t.distilled = "";
-      }
-
-      if (tabId === activeTabIdRef.current || activeTabIdRef.current === null) {
-        if (activeTabIdRef.current === null) setActiveTabId(tabId);
-        bump();
-        if (isNewContent && modeRef.current !== "original" && newContent) {
-          processWithLLMRef.current(newContent, modeRef.current, tabId);
+    const attempt = (retriesLeft: number) => {
+      extractFromTab(tabId).then((data) => {
+        if (!data) {
+          if (retriesLeft > 0) {
+            console.log("[Reader] Extraction returned no data, retrying...", retriesLeft, "left");
+            setTimeout(() => attempt(retriesLeft - 1), 500);
+            return;
+          }
+          extractionInProgressRef.current.delete(tabId);
+          bump();
+          console.warn("[Reader] Extraction returned no data for tab", tabId);
+          return;
         }
-      }
-    });
+        extractionInProgressRef.current.delete(tabId);
+        bump();
+        const newContent = data.content || "";
+        console.log("[Reader] Content extracted:", data.title, newContent.length, "chars");
+        const t = getTab(tabId);
+
+        const isNewContent = normalizeContent(t.original) !== normalizeContent(newContent);
+        t.original = newContent;
+        t.title = data.title;
+        if (isNewContent) {
+          t.selectedText = "";
+          t.executive = "";
+          t.distilled = "";
+        }
+
+        if (tabId === activeTabIdRef.current || activeTabIdRef.current === null) {
+          if (activeTabIdRef.current === null) setActiveTabId(tabId);
+          bump();
+          if (isNewContent && modeRef.current !== "original" && newContent) {
+            processWithLLMRef.current(newContent, modeRef.current, tabId);
+          }
+        }
+      });
+    };
+
+    attempt(2);
   }
 
   function switchToTab(tabId: number) {
@@ -210,6 +217,8 @@ export default function App() {
           requestExtractionForTab(tabId);
           return;
         }
+        const url = currentTab.url || "";
+        if (!url.startsWith("http://") && !url.startsWith("https://") && !url.startsWith("file://")) return;
         if (currentTab.status === "complete") {
           requestExtractionForTab(tabId);
         } else {
@@ -251,23 +260,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const handler = (message: { type: string; tabId?: number; windowId?: number; data?: unknown }, _sender: { tab?: { id?: number; windowId?: number } }) => {
-      // Ignorar mensajes de otras ventanas: este side panel solo responde a eventos de su propia ventana
-      if (myWindowIdRef.current != null && message.windowId != null && message.windowId !== myWindowIdRef.current) {
-        return;
-      }
-      if (message.type === "ACTIVE_TAB_CHANGED" && message.tabId != null) {
-        switchToTabRef.current(message.tabId);
-      } else if (message.type === "NAVIGATION_OCCURRED" && message.tabId != null) {
-        const navTabId = message.tabId;
-        const existing = navigationDebounceRef.current.get(navTabId);
-        if (existing) clearTimeout(existing);
-        const timer = setTimeout(() => {
-          navigationDebounceRef.current.delete(navTabId);
-          requestExtractionForTab(navTabId);
-        }, 300);
-        navigationDebounceRef.current.set(navTabId, timer);
-      } else if (message.type === "SELECTION_DETECTED") {
+    const handler = (message: { type: string; data?: unknown }, _sender: { tab?: { id?: number; windowId?: number } }) => {
+      if (message.type === "SELECTION_DETECTED") {
         if (_sender.tab?.id !== activeTabIdRef.current) return;
         const data = message.data as { text: string; url: string };
         const senderTabId = activeTabIdRef.current!;
@@ -303,6 +297,8 @@ export default function App() {
           requestExtractionForTab(tabId);
           return;
         }
+        const url = currentTab.url || "";
+        if (!url.startsWith("http://") && !url.startsWith("https://") && !url.startsWith("file://")) return;
         if (currentTab.status === "complete") {
           requestExtractionForTab(tabId);
         } else {
@@ -312,45 +308,78 @@ export default function App() {
       });
     });
 
-    let port: { disconnect: () => void; onDisconnect: { addListener: (cb: () => void) => void } };
-    try {
-      port = chrome.runtime.connect({ name: "sidepanel" });
-    } catch {
-      port = { disconnect: () => {}, onDisconnect: { addListener: () => {} } };
-    }
+    const port = chrome.runtime.connect({ name: "sidepanel" });
     let disconnected = false;
 
     port.onDisconnect.addListener(() => {
       if (disconnected) return;
       disconnected = true;
-      try { chrome.runtime.connect({ name: "sidepanel" }); } catch { /* no listener */ }
-      chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-        if (chrome.runtime.lastError) return;
-        const tab = tabs[0];
-        const tabId = tab?.id;
-        if (tabId) {
-          setActiveTabId(null);
-          clearContent();
-        }
-      });
+      chrome.runtime.connect({ name: "sidepanel" });
     });
 
-    const onUpdated = (tabId: number, changeInfo: { status?: string; url?: string }, tab: { windowId?: number } | undefined) => {
+    const handleNavigation = (tabId: number) => {
+      if (myWindowIdRef.current != null) {
+        chrome.tabs.get(tabId, (tab) => {
+          if (chrome.runtime.lastError) return;
+          if (tab.windowId !== myWindowIdRef.current) return;
+          scheduleExtraction(tabId);
+        });
+      } else {
+        scheduleExtraction(tabId);
+      }
+    };
+
+    const scheduleExtraction = (tabId: number) => {
+      const existing = navigationDebounceRef.current.get(tabId);
+      if (existing) clearTimeout(existing);
+      const timer = setTimeout(() => {
+        navigationDebounceRef.current.delete(tabId);
+        requestExtractionForTab(tabId);
+      }, 300);
+      navigationDebounceRef.current.set(tabId, timer);
+    };
+
+    const onUpdated = (tabId: number, changeInfo: { status?: string; url?: string }, tab: { windowId?: number; url?: string } | undefined) => {
       if (myWindowIdRef.current != null && tab?.windowId != null && tab.windowId !== myWindowIdRef.current) return;
       if (changeInfo.status === "complete" && pageLoadingRef.current.delete(tabId)) {
         bump();
       }
-      if (tabId === activeTabIdRef.current && changeInfo.status === "complete") {
+      if (changeInfo.status === "complete" && tabId === activeTabIdRef.current) {
+        const url = tab?.url || "";
+        if (!url.startsWith("http://") && !url.startsWith("https://") && !url.startsWith("file://")) return;
         console.log("[Reader] Tab", tabId, "completed loading — re-extracting");
         requestExtractionForTab(tabId);
       }
     };
     chrome.tabs.onUpdated.addListener(onUpdated);
 
+    const onActivated = (activeInfo: { tabId: number; windowId: number }) => {
+      if (myWindowIdRef.current != null && activeInfo.windowId !== myWindowIdRef.current) return;
+      switchToTabRef.current(activeInfo.tabId);
+    };
+    chrome.tabs.onActivated.addListener(onActivated);
+
+    const onWebNav = (details: { tabId: number; frameId: number; url: string }) => {
+      if (details.frameId !== 0) return;
+      if (!details.url.startsWith("http://") && !details.url.startsWith("https://") && !details.url.startsWith("file://")) return;
+      handleNavigation(details.tabId);
+    };
+    if (chrome.webNavigation) {
+      chrome.webNavigation.onCompleted.addListener(onWebNav);
+      chrome.webNavigation.onHistoryStateUpdated.addListener(onWebNav);
+      chrome.webNavigation.onReferenceFragmentUpdated.addListener(onWebNav);
+    }
+
     return () => {
       disconnected = true;
       port.disconnect();
       chrome.tabs.onUpdated.removeListener(onUpdated);
+      chrome.tabs.onActivated.removeListener(onActivated);
+      if (chrome.webNavigation) {
+        chrome.webNavigation.onCompleted.removeListener(onWebNav);
+        chrome.webNavigation.onHistoryStateUpdated.removeListener(onWebNav);
+        chrome.webNavigation.onReferenceFragmentUpdated.removeListener(onWebNav);
+      }
     };
   }, []);
 

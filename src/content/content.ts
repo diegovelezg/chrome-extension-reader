@@ -38,22 +38,42 @@ async function extractContent(): Promise<{ title: string; content: string; url: 
   return { title, content, url };
 }
 
+function isContextValid(): boolean {
+  try {
+    return !!chrome.runtime?.id;
+  } catch {
+    return false;
+  }
+}
+
 function handleSelection(): void {
+  if (!isContextValid()) return;
   const selection = window.getSelection();
   if (!selection || selection.isCollapsed) return;
 
   const text = selection.toString().trim();
   if (text.length < 10) return;
 
-  chrome.runtime.sendMessage({
-    type: "SELECTION_DETECTED",
-    data: { text, url: window.location.href },
-  });
+  try {
+    chrome.runtime.sendMessage(
+      {
+        type: "SELECTION_DETECTED",
+        data: { text, url: window.location.href },
+      },
+      () => {
+        void chrome.runtime.lastError;
+      },
+    );
+  } catch {
+    // Extension context invalidated; ignore.
+  }
 }
 
-document.addEventListener("mouseup", () => {
-  setTimeout(handleSelection, 100);
-});
+if (isContextValid()) {
+  document.addEventListener("mouseup", () => {
+    setTimeout(handleSelection, 100);
+  });
+}
 
 function waitForDOMStability(timeout = 3000, stabilityThreshold = 500): Promise<void> {
   return new Promise((resolve) => {
@@ -83,12 +103,18 @@ function waitForDOMStability(timeout = 3000, stabilityThreshold = 500): Promise<
   });
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.type === "REQUEST_EXTRACTION") {
-    waitForDOMStability().then(() => extractContent()).then((result) => {
-      sendResponse({ type: "CONTENT_EXTRACTED", data: result });
-    });
-    return true;
-  }
-  return false;
-});
+if (isContextValid()) {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message.type === "REQUEST_EXTRACTION") {
+      waitForDOMStability().then(() => extractContent()).then((result) => {
+        try {
+          sendResponse({ type: "CONTENT_EXTRACTED", data: result });
+        } catch {
+          // Extension context invalidated; ignore.
+        }
+      });
+      return true;
+    }
+    return false;
+  });
+}

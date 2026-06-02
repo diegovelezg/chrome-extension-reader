@@ -44,10 +44,11 @@ declare const chrome: {
     sendMessage(tabId: number, message: { type: string; data?: unknown }): Promise<unknown>;
     onActivated: {
       addListener(callback: (activeInfo: { tabId: number; windowId: number }) => void): void;
+      removeListener(callback: (activeInfo: { tabId: number; windowId: number }) => void): void;
     };
     onUpdated: {
-      addListener(callback: (tabId: number, changeInfo: { status?: string; url?: string }, tab: { windowId?: number }) => void): void;
-      removeListener(callback: (tabId: number, changeInfo: { status?: string; url?: string }, tab: { windowId?: number }) => void): void;
+      addListener(callback: (tabId: number, changeInfo: { status?: string; url?: string }, tab: { windowId?: number; url?: string }) => void): void;
+      removeListener(callback: (tabId: number, changeInfo: { status?: string; url?: string }, tab: { windowId?: number; url?: string }) => void): void;
     };
   };
   scripting: {
@@ -60,6 +61,11 @@ declare const chrome: {
         url: string;
         frameId: number;
       }) => void): void;
+      removeListener(callback: (details: {
+        tabId: number;
+        url: string;
+        frameId: number;
+      }) => void): void;
     };
     onHistoryStateUpdated: {
       addListener(callback: (details: {
@@ -67,9 +73,19 @@ declare const chrome: {
         url: string;
         frameId: number;
       }) => void): void;
+      removeListener(callback: (details: {
+        tabId: number;
+        url: string;
+        frameId: number;
+      }) => void): void;
     };
     onReferenceFragmentUpdated: {
       addListener(callback: (details: {
+        tabId: number;
+        url: string;
+        frameId: number;
+      }) => void): void;
+      removeListener(callback: (details: {
         tabId: number;
         url: string;
         frameId: number;
