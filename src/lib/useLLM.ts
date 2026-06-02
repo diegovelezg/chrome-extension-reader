@@ -1,8 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { LLMClient, StreamCallback, createLLMClient } from "./llm-client";
+import { LLMClient, StreamCallback } from "./llm-client";
 import { Settings } from "../types";
 
-export interface LLMState {
+interface LLMState {
   isStreaming: boolean;
   content: string;
   error: string | null;
@@ -20,7 +20,7 @@ export function useLLM(settings: Settings) {
 
   useEffect(() => {
     if (!clientRef.current) {
-      clientRef.current = createLLMClient(settings);
+      clientRef.current = new LLMClient(settings);
     } else {
       clientRef.current.updateSettings(settings);
     }

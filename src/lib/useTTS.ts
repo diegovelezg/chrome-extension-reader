@@ -1,8 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { TTSClient, createTTSClient } from "./tts-client";
+import { TTSClient } from "./tts-client";
 import { Settings } from "../types";
 
-export interface TTSState {
+interface TTSState {
   isPlaying: boolean;
   isLoading: boolean;
   isPaused: boolean;
@@ -38,7 +38,7 @@ export function useTTS(settings: Settings) {
 
   useEffect(() => {
     if (!clientRef.current) {
-      clientRef.current = createTTSClient(settings);
+      clientRef.current = new TTSClient(settings);
     } else {
       clientRef.current.updateSettings(settings);
     }
@@ -119,7 +119,6 @@ export function useTTS(settings: Settings) {
       }
     };
     audio.onerror = () => {
-      console.log("TTS API failed, falling back to browser TTS");
       playFallback(text);
     };
   }, [playFallback]);
@@ -174,7 +173,6 @@ export function useTTS(settings: Settings) {
 
       await audio.play();
     } catch (error) {
-      console.log("TTS API unavailable, falling back to browser TTS");
       playFallback(text);
     }
   }, [state.speed, playFallback, attachAudioListeners]);

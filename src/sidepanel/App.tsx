@@ -148,10 +148,7 @@ export default function App() {
   }
 
   function requestExtractionForTab(tabId: number) {
-    if (extractionInProgressRef.current.has(tabId)) {
-      console.log("[Reader] Extraction already in progress for tab", tabId, "— skipping");
-      return;
-    }
+    if (extractionInProgressRef.current.has(tabId)) return;
     extractionInProgressRef.current.add(tabId);
     if (tabId === activeTabIdRef.current) {
       const t = getTab(tabId);
@@ -160,25 +157,21 @@ export default function App() {
       clearContent();
     }
     bump();
-    console.log("[Reader] Extracting content from tab", tabId);
 
     const attempt = (retriesLeft: number) => {
       extractFromTab(tabId).then((data) => {
         if (!data) {
           if (retriesLeft > 0) {
-            console.log("[Reader] Extraction returned no data, retrying...", retriesLeft, "left");
             setTimeout(() => attempt(retriesLeft - 1), 500);
             return;
           }
           extractionInProgressRef.current.delete(tabId);
           bump();
-          console.warn("[Reader] Extraction returned no data for tab", tabId);
           return;
         }
         extractionInProgressRef.current.delete(tabId);
         bump();
         const newContent = data.content || "";
-        console.log("[Reader] Content extracted:", data.title, newContent.length, "chars");
         const t = getTab(tabId);
 
         const isNewContent = normalizeContent(t.original) !== normalizeContent(newContent);
@@ -286,17 +279,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    console.log("[Reader] Sidepanel mounted, querying active tab...");
     chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
       if (chrome.runtime.lastError) return;
       const tab = tabs[0];
       const tabId = tab?.id;
-      if (!tabId) {
-        console.warn("[Reader] No active tab found");
-        return;
-      }
+      if (!tabId) return;
       myWindowIdRef.current = tab.windowId ?? null;
-      console.log("[Reader] Active tab:", tabId, "in window:", tab.windowId);
       setActiveTabId(tabId);
 
       chrome.tabs.get(tabId, (currentTab) => {
@@ -358,7 +346,6 @@ export default function App() {
       if (changeInfo.status === "complete" && tabId === activeTabIdRef.current) {
         const url = tab?.url || "";
         if (!isSupportedUrl(url)) return;
-        console.log("[Reader] Tab", tabId, "completed loading — re-extracting");
         requestExtractionForTab(tabId);
       }
     };
@@ -450,7 +437,7 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen">
       <header className="flex items-center justify-between px-4 py-3 border-b">
-        <h1 className="text-lg font-semibold">Reader</h1>
+        <h1 className="text-lg font-semibold">Cognitive Offload</h1>
         <div className="flex items-center gap-2">
           {activeTab?.title && <span className="text-xs text-muted-foreground truncate max-w-[200px]">{activeTab.title}</span>}
           <Button variant="ghost" size="sm" onClick={handleReextract}><RefreshCw className="size-4" /></Button>

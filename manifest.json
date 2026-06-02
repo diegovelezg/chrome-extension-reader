@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Reader",
+  "name": "Cognitive Offload: Reader",
   "version": "1.0.0",
-  "description": "Extract and process webpage content with configurable LLM and TTS",
+  "description": "Extract, summarize, and listen to webpage content with configurable LLM and TTS",
   "permissions": ["activeTab", "storage", "scripting", "sidePanel", "webNavigation"],
   "side_panel": {
     "default_path": "src/sidepanel/sidepanel.html"

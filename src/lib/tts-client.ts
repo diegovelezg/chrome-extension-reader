@@ -1,6 +1,6 @@
 import { Settings } from "../types";
 
-export interface TTSOptions {
+interface TTSOptions {
   input: string;
   voice?: string;
   speed?: number;
@@ -41,8 +41,4 @@ export class TTSClient {
 
     return response.arrayBuffer();
   }
-}
-
-export function createTTSClient(settings: Settings): TTSClient {
-  return new TTSClient(settings);
 }

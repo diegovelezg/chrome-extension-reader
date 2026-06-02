@@ -1,7 +1,7 @@
 # Progress Checklist
 
 ## Setup
-- [x] 1. Initialize project with Vite + CRXJS + React + TypeScript
+- [x] 1. Initialize project with Vite + vite-plugin-web-extension + React + TypeScript
 - [x] 2. Configure Tailwind CSS + Shadcn/ui
 - [x] 3. Create Manifest V3 with required permissions (`sidePanel`, `activeTab`, `storage`, `scripting`)
 
@@ -18,7 +18,7 @@
 
 ## Core — LLM Integration
 - [x] 11. `llm-client.ts` — OpenAI-compatible client with streaming (SSE)
-- [x] 12. `prompts.ts` — Default prompts for Mode 1 (Executive Summary + Takeaways) and Mode 2 (Distilled)
+- [x] 12. Prompts configured in `Settings` (editable via SettingsPanel, defaults in `types/index.ts`)
 - [x] 13. `useLLM` hook — manage streaming state, accumulate chunks
 - [x] 14. Mode 1 — extract content → send to LLM → render streaming Executive Summary + Takeaways
 - [x] 15. Mode 2 — extract content → send to LLM → render streaming Distilled Summary

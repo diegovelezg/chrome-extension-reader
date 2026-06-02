@@ -1,6 +1,6 @@
 import { Settings } from "../types";
 
-export interface LLMStreamChunk {
+interface LLMStreamChunk {
   content: string;
   done: boolean;
   error?: string;
@@ -100,8 +100,4 @@ export class LLMClient {
       onChunk({ content: "", done: true, error: message });
     }
   }
-}
-
-export function createLLMClient(settings: Settings): LLMClient {
-  return new LLMClient(settings);
 }
