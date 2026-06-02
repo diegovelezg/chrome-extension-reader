@@ -9,7 +9,6 @@ import { Markdown } from "../components/Markdown";
 import { TTSControls } from "../components/TTSControls";
 import { SettingsPanel } from "../components/SettingsPanel";
 import { Button } from "../components/ui/button";
-import { Separator } from "../components/ui/separator";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
 
 interface TabAudio {
@@ -465,17 +464,33 @@ export default function App() {
 
       <TooltipProvider>
         <div className="flex items-center justify-between px-4 py-1.5 border-b bg-muted/20">
-          <Tooltip>
-            <TooltipTrigger>
-              <Button variant="ghost" size="xs" onClick={handleCopyRichText}>
-                <Copy className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Copy</TooltipContent>
-          </Tooltip>
+          <div className="flex items-center gap-2">
+            <TTSControls
+              isPlaying={tts.isPlaying}
+              isLoading={tts.isLoading}
+              isPaused={tts.isPaused}
+              speed={tts.speed}
+              error={tts.error}
+              disabled={!displayContent}
+              onPlay={handlePlayTTS}
+              onPause={tts.pause}
+              onResume={tts.resume}
+              onStop={tts.stop}
+              onSpeedChange={tts.setSpeed}
+            />
+            <div className="w-px h-4 bg-border" />
+            <Tooltip>
+              <TooltipTrigger>
+                <Button variant="ghost" size="xs" onClick={handleCopyRichText} disabled={!displayContent}>
+                  <Copy className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Copy</TooltipContent>
+            </Tooltip>
+          </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1">
-              <Button variant="ghost" size="xs" onClick={() => handleSettingsSave({ ...settings, fontSize: Math.max(12, settings.fontSize - 1) })}>
+              <Button variant="ghost" size="xs" disabled={!displayContent} onClick={() => handleSettingsSave({ ...settings, fontSize: Math.max(12, settings.fontSize - 1) })}>
                 <Minus className="size-3" />
               </Button>
               <Tooltip>
@@ -484,12 +499,12 @@ export default function App() {
                 </TooltipTrigger>
                 <TooltipContent>Font size</TooltipContent>
               </Tooltip>
-              <Button variant="ghost" size="xs" onClick={() => handleSettingsSave({ ...settings, fontSize: Math.min(24, settings.fontSize + 1) })}>
+              <Button variant="ghost" size="xs" disabled={!displayContent} onClick={() => handleSettingsSave({ ...settings, fontSize: Math.min(24, settings.fontSize + 1) })}>
                 <Plus className="size-3" />
               </Button>
             </div>
             <div className="flex items-center gap-1">
-              <Button variant="ghost" size="xs" onClick={() => handleSettingsSave({ ...settings, lineHeight: Math.max(1.0, +(settings.lineHeight - 0.1).toFixed(1)) })}>
+              <Button variant="ghost" size="xs" disabled={!displayContent} onClick={() => handleSettingsSave({ ...settings, lineHeight: Math.max(1.0, +(settings.lineHeight - 0.1).toFixed(1)) })}>
                 <Minus className="size-3" />
               </Button>
               <Tooltip>
@@ -498,7 +513,7 @@ export default function App() {
                 </TooltipTrigger>
                 <TooltipContent>Line spacing</TooltipContent>
               </Tooltip>
-              <Button variant="ghost" size="xs" onClick={() => handleSettingsSave({ ...settings, lineHeight: Math.min(2.5, +(settings.lineHeight + 0.1).toFixed(1)) })}>
+              <Button variant="ghost" size="xs" disabled={!displayContent} onClick={() => handleSettingsSave({ ...settings, lineHeight: Math.min(2.5, +(settings.lineHeight + 0.1).toFixed(1)) })}>
                 <Plus className="size-3" />
               </Button>
             </div>
@@ -558,27 +573,6 @@ export default function App() {
         )}
       </div>
 
-      {displayContent && (
-        <>
-          <Separator />
-          <div className="px-4 py-3">
-            <TTSControls
-              isPlaying={tts.isPlaying}
-              isLoading={tts.isLoading}
-              isPaused={tts.isPaused}
-              progress={tts.progress}
-              speed={tts.speed}
-              error={tts.error}
-              isFallback={tts.isFallback}
-              onPlay={handlePlayTTS}
-              onPause={tts.pause}
-              onResume={tts.resume}
-              onStop={tts.stop}
-              onSpeedChange={tts.setSpeed}
-            />
-          </div>
-        </>
-      )}
     </div>
   );
 }

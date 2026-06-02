@@ -1,14 +1,14 @@
-import { Loader2, Pause, Play, Square, Volume2 } from "lucide-react";
-import { Slider } from "../components/ui/slider";
+import { Loader2, Pause, Play, Square } from "lucide-react";
+
+const SPEED_VALUES = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
 
 interface TTSControlsProps {
   isPlaying: boolean;
   isLoading: boolean;
   isPaused: boolean;
-  progress: number;
   speed: number;
   error: string | null;
-  isFallback: boolean;
+  disabled?: boolean;
   onPlay: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -20,99 +20,56 @@ export function TTSControls({
   isPlaying,
   isLoading,
   isPaused,
-  progress,
   speed,
   error,
-  isFallback,
+  disabled,
   onPlay,
   onPause,
   onResume,
   onStop,
   onSpeedChange,
 }: TTSControlsProps) {
+  const btnBase = "flex items-center justify-center p-1.5 rounded-md hover:bg-accent text-foreground hover:text-accent-foreground disabled:opacity-40 disabled:pointer-events-none";
+
+  const cycleSpeed = () => {
+    const idx = SPEED_VALUES.findIndex((v) => Math.abs(v - speed) < 0.01);
+    onSpeedChange(SPEED_VALUES[(idx + 1) % SPEED_VALUES.length]);
+  };
+
   return (
-    <div className="flex flex-col gap-3 p-3 bg-muted/50 rounded-lg">
-      {isFallback && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground bg-background/50 px-2 py-1 rounded">
-          <Volume2 className="size-3" />
-          <span>Using browser TTS (no TTS endpoint configured)</span>
-        </div>
-      )}
-
-      <div className="flex items-center gap-2">
-        {!isPlaying && !isPaused ? (
-          <button
-            onClick={onPlay}
-            disabled={isLoading}
-            className="flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            <Play className="size-5 fill-current" />
-          </button>
-        ) : isPlaying ? (
-          <button
-            onClick={onPause}
-            className="flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
-          >
-            <Pause className="size-5 fill-current" />
-          </button>
-        ) : (
-          <button
-            onClick={onResume}
-            className="flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
-          >
-            <Play className="size-5 fill-current" />
-          </button>
-        )}
-
-        <button
-          onClick={onStop}
-          disabled={!isPlaying && !isPaused}
-          className="flex items-center justify-center w-10 h-10 rounded-full bg-muted hover:bg-muted/80 disabled:opacity-50"
-        >
-          <Square className="size-4 fill-current" />
+    <div className="flex items-center gap-0.5">
+      {isLoading ? (
+        <button disabled className={btnBase}>
+          <Loader2 className="size-3.5 animate-spin" />
         </button>
-
-        {isLoading && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            <span>Generating audio...</span>
-          </div>
-        )}
-
-        {error && (
-          <span className="text-sm text-destructive">{error}</span>
-        )}
-      </div>
-
-      {isPlaying && (
-        <div className="space-y-1">
-          <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-            <div
-              className="h-full bg-primary transition-all duration-200"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-          <span className="text-xs text-muted-foreground">
-            {Math.round(progress)}%
-          </span>
-        </div>
+      ) : !isPlaying && !isPaused ? (
+        <button onClick={onPlay} disabled={disabled} title={error || "Play"} className={btnBase}>
+          <Play className="size-3.5 fill-current" />
+        </button>
+      ) : isPlaying ? (
+        <button onClick={onPause} disabled={disabled} title="Pause" className={btnBase}>
+          <Pause className="size-3.5 fill-current" />
+        </button>
+      ) : (
+        <button onClick={onResume} disabled={disabled} title="Resume" className={btnBase}>
+          <Play className="size-3.5 fill-current" />
+        </button>
       )}
 
-      <div className="flex items-center gap-3">
-        <span className="text-xs text-muted-foreground w-12">Speed</span>
-        <Slider
-          value={[speed]}
-          min={0.5}
-          max={2}
-          step={0.1}
-          onValueChange={(value) => {
-            const v = Array.isArray(value) ? value[0] : value;
-            onSpeedChange(v);
-          }}
-          className="flex-1"
-        />
-        <span className="text-xs text-muted-foreground w-8">{speed}x</span>
-      </div>
+      {(isPlaying || isPaused) && (
+        <button onClick={onStop} disabled={disabled} title="Stop" className={btnBase}>
+          <Square className="size-3 fill-current" />
+        </button>
+      )}
+
+      <button
+        onClick={cycleSpeed}
+        disabled={disabled}
+        title={`Speed: ${speed}x`}
+        className="px-1.5 py-0.5 rounded-md hover:bg-accent text-[10px] font-medium tabular-nums text-muted-foreground hover:text-accent-foreground disabled:opacity-40 disabled:pointer-events-none"
+      >
+        {speed}x
+      </button>
     </div>
   );
 }
