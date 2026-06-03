@@ -204,14 +204,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const port = chrome.runtime.connect({ name: "sidepanel" });
-    let disconnected = false;
-    port.onDisconnect.addListener(() => {
-      if (disconnected) return;
-      disconnected = true;
-      chrome.runtime.connect({ name: "sidepanel" });
-    });
-
     const onUpdated = (tabId: number, changeInfo: { status?: string }, _tab: unknown) => {
       if (tabId !== pinnedTabIdRef.current) return;
       if (changeInfo.status === "complete") {
@@ -228,8 +220,6 @@ export default function App() {
     });
 
     return () => {
-      disconnected = true;
-      port.disconnect();
       chrome.tabs.onUpdated.removeListener(onUpdated);
     };
   }, []);
