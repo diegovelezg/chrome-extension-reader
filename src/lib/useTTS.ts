@@ -12,13 +12,6 @@ interface TTSState {
   isFallback: boolean;
 }
 
-interface CachedAudio {
-  url: string;
-  text: string;
-  currentTime: number;
-  duration: number;
-}
-
 export function useTTS(settings: Settings) {
   const [state, setState] = useState<TTSState>({
     isPlaying: false,
@@ -33,8 +26,7 @@ export function useTTS(settings: Settings) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const clientRef = useRef<TTSClient | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
-  const currentTabIdRef = useRef<number | null>(null);
-  const audioCacheRef = useRef<Map<number, CachedAudio>>(new Map());
+  const cachedAudioRef = useRef<{ url: string; text: string; currentTime: number; duration: number } | null>(null);
 
   useEffect(() => {
     if (!clientRef.current) {
@@ -44,11 +36,11 @@ export function useTTS(settings: Settings) {
     }
   }, [settings]);
 
-  const revokeCachedUrl = useCallback((tabId: number) => {
-    const c = audioCacheRef.current.get(tabId);
+  const revokeCachedUrl = useCallback(() => {
+    const c = cachedAudioRef.current;
     if (c) {
       URL.revokeObjectURL(c.url);
-      audioCacheRef.current.delete(tabId);
+      cachedAudioRef.current = null;
     }
   }, []);
 
@@ -61,10 +53,7 @@ export function useTTS(settings: Settings) {
     }
     window.speechSynthesis.cancel();
     utteranceRef.current = null;
-    if (currentTabIdRef.current != null) {
-      revokeCachedUrl(currentTabIdRef.current);
-    }
-    currentTabIdRef.current = null;
+    revokeCachedUrl();
     setState((prev) => ({ ...prev, isPlaying: false, isLoading: false, progress: 0, error: null, isFallback: false }));
   }, []);
 
@@ -97,7 +86,7 @@ export function useTTS(settings: Settings) {
     window.speechSynthesis.speak(utterance);
   }, [state.speed]);
 
-  const attachAudioListeners = useCallback((audio: HTMLAudioElement, text: string, tabId: number) => {
+  const attachAudioListeners = useCallback((audio: HTMLAudioElement, text: string) => {
     audio.onplay = () => {
       setState((prev) => ({ ...prev, isPlaying: true, isLoading: false, isPaused: false, isFallback: false }));
     };
@@ -111,7 +100,7 @@ export function useTTS(settings: Settings) {
       if (audio.duration) {
         const progress = (audio.currentTime / audio.duration) * 100;
         setState((prev) => ({ ...prev, progress }));
-        const c = audioCacheRef.current.get(tabId);
+        const c = cachedAudioRef.current;
         if (c && c.text === text) {
           c.currentTime = audio.currentTime;
           c.duration = audio.duration;
@@ -123,10 +112,8 @@ export function useTTS(settings: Settings) {
     };
   }, [playFallback]);
 
-  const play = useCallback(async (text: string, tabId: number) => {
+  const play = useCallback(async (text: string, _tabId: number) => {
     if (!text.trim()) return;
-
-    currentTabIdRef.current = tabId;
 
     if (audioRef.current) {
       audioRef.current.pause();
@@ -135,13 +122,13 @@ export function useTTS(settings: Settings) {
     }
     window.speechSynthesis.cancel();
 
-    const cached = audioCacheRef.current.get(tabId);
+    const cached = cachedAudioRef.current;
     if (cached && cached.text === text) {
       const audio = new Audio(cached.url);
       audioRef.current = audio;
       audio.currentTime = cached.currentTime;
       audio.playbackRate = state.speed;
-      attachAudioListeners(audio, text, tabId);
+      attachAudioListeners(audio, text);
       setState((prev) => ({ ...prev, isLoading: true, error: null, isFallback: false }));
       try {
         await audio.play();
@@ -162,14 +149,13 @@ export function useTTS(settings: Settings) {
 
       const blob = new Blob([audioBuffer], { type: "audio/mp3" });
       const url = URL.createObjectURL(blob);
-      const existing = audioCacheRef.current.get(tabId);
-      if (existing) URL.revokeObjectURL(existing.url);
-      audioCacheRef.current.set(tabId, { url, text, currentTime: 0, duration: 0 });
+      revokeCachedUrl();
+      cachedAudioRef.current = { url, text, currentTime: 0, duration: 0 };
 
       const audio = new Audio(url);
       audioRef.current = audio;
       audio.playbackRate = state.speed;
-      attachAudioListeners(audio, text, tabId);
+      attachAudioListeners(audio, text);
 
       await audio.play();
     } catch (error) {
@@ -180,10 +166,8 @@ export function useTTS(settings: Settings) {
   const pause = useCallback(() => {
     if (audioRef.current) {
       audioRef.current.pause();
-      if (currentTabIdRef.current != null) {
-        const c = audioCacheRef.current.get(currentTabIdRef.current);
-        if (c) c.currentTime = audioRef.current.currentTime;
-      }
+      const c = cachedAudioRef.current;
+      if (c) c.currentTime = audioRef.current.currentTime;
     } else {
       window.speechSynthesis.pause();
     }
@@ -199,30 +183,6 @@ export function useTTS(settings: Settings) {
     setState((prev) => ({ ...prev, isPlaying: true, isPaused: false }));
   }, []);
 
-  const switchFromTab = useCallback((tabId: number) => {
-    if (audioRef.current) {
-      const c = audioCacheRef.current.get(tabId);
-      if (c) {
-        c.currentTime = audioRef.current.currentTime;
-        c.duration = audioRef.current.duration || c.duration;
-      }
-      audioRef.current.pause();
-    } else {
-      window.speechSynthesis.pause();
-    }
-  }, []);
-
-  const switchToTab = useCallback((tabId: number) => {
-    currentTabIdRef.current = tabId;
-    const c = audioCacheRef.current.get(tabId);
-    if (c && c.duration > 0) {
-      const progress = (c.currentTime / c.duration) * 100;
-      setState((prev) => ({ ...prev, isPlaying: false, isLoading: false, isPaused: false, progress, error: null, isFallback: false }));
-    } else {
-    setState((prev) => ({ ...prev, isPlaying: false, isLoading: false, isPaused: false, progress: 0, error: null, isFallback: false }));
-    }
-  }, []);
-
   useEffect(() => {
     return () => {
       if (audioRef.current) {
@@ -232,8 +192,7 @@ export function useTTS(settings: Settings) {
       }
       window.speechSynthesis.cancel();
       utteranceRef.current = null;
-      audioCacheRef.current.forEach((c) => URL.revokeObjectURL(c.url));
-      audioCacheRef.current.clear();
+      revokeCachedUrl();
     };
   }, []);
 
@@ -244,8 +203,5 @@ export function useTTS(settings: Settings) {
     resume,
     stop,
     setSpeed,
-    switchFromTab,
-    switchToTab,
-    currentTabIdRef,
   };
 }

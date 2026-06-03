@@ -3,7 +3,10 @@
   "name": "Cognitive Offload: Reader",
   "version": "1.0.0",
   "description": "Extract, summarize, and listen to webpage content with configurable LLM and TTS",
-  "permissions": ["activeTab", "storage", "scripting", "sidePanel", "webNavigation"],
+  "permissions": ["activeTab", "storage", "scripting", "sidePanel", "tabs"],
+  "action": {
+    "default_title": "Open Reader"
+  },
   "side_panel": {
     "default_path": "src/sidepanel/sidepanel.html"
   },
