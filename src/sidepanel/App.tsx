@@ -229,7 +229,7 @@ export default function App() {
       const tabId = info.tabId;
       if (!tabId) return;
       pinnedTabIdRef.current = tabId;
-      tabRef.current = emptyTab();
+      if (tabRef.current.original) return;
       clearContent();
       tts.stop();
       bump();
