@@ -4,6 +4,7 @@ interface TTSOptions {
   input: string;
   voice?: string;
   speed?: number;
+  signal?: AbortSignal;
 }
 
 export class TTSClient {
@@ -19,7 +20,7 @@ export class TTSClient {
 
   async synthesize(options: TTSOptions): Promise<ArrayBuffer> {
     const { ttsEndpoint, ttsVoice } = this.settings;
-    const { input, voice, speed = 1.0 } = options;
+    const { input, voice, speed = 1.0, signal } = options;
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -37,6 +38,7 @@ export class TTSClient {
         voice: voice || ttsVoice,
         speed,
       }),
+      signal,
     });
 
     if (!response.ok) {

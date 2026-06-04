@@ -26,7 +26,10 @@ export function useTTS(settings: Settings) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const clientRef = useRef<TTSClient | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const speedRef = useRef(state.speed);
+  speedRef.current = state.speed;
   const cachedAudioRef = useRef<{ url: string; text: string; currentTime: number; duration: number } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!clientRef.current) {
@@ -45,6 +48,7 @@ export function useTTS(settings: Settings) {
   }, []);
 
   const stop = useCallback(() => {
+    abortRef.current?.abort();
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -68,7 +72,7 @@ export function useTTS(settings: Settings) {
     window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = state.speed;
+    utterance.rate = speedRef.current;
     utteranceRef.current = utterance;
 
     setState((prev) => ({ ...prev, isPlaying: true, isLoading: false, isPaused: false, isFallback: true, error: null }));
@@ -84,7 +88,7 @@ export function useTTS(settings: Settings) {
     };
 
     window.speechSynthesis.speak(utterance);
-  }, [state.speed]);
+  }, []);
 
   const attachAudioListeners = useCallback((audio: HTMLAudioElement, text: string) => {
     audio.onplay = () => {
@@ -142,9 +146,14 @@ export function useTTS(settings: Settings) {
     try {
       setState((prev) => ({ ...prev, isLoading: true, error: null, isFallback: false, isPaused: false }));
 
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
+
       const audioBuffer = await clientRef.current!.synthesize({
         input: text,
         speed: state.speed,
+        signal: ac.signal,
       });
 
       const blob = new Blob([audioBuffer], { type: "audio/mp3" });
@@ -185,6 +194,7 @@ export function useTTS(settings: Settings) {
 
   useEffect(() => {
     return () => {
+      abortRef.current?.abort();
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.src = "";

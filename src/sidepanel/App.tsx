@@ -11,7 +11,7 @@ import { SettingsPanel } from "../components/SettingsPanel";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
 
-const L = (msg: string, ...args: unknown[]) => console.warn(`[SP] ${msg}`, ...args);
+const L = (_msg: string, ..._args: unknown[]) => {};
 
 interface TabData {
   original: string;
@@ -100,17 +100,22 @@ export default function App() {
   const contentRef = useRef<HTMLDivElement>(null);
   const modeRef = useRef(mode);
   modeRef.current = mode;
+  const streamedContentRef = useRef(streamedContent);
+  streamedContentRef.current = streamedContent;
   const processWithLLMRef = useRef<(sourceContent: string, targetMode: Mode) => void>(null!);
   const extractingRef = useRef(false);
   const extractTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const extractIdRef = useRef(0);
 
   const tab = tabRef.current;
   const isExtracting = extractingRef.current;
   const showLoading = !tab.original && isExtracting;
 
   function saveCurrentLlm() {
-    if (mode === "original" || !streamedContent) return;
-    tab[mode] = streamedContent;
+    const m = modeRef.current;
+    const c = streamedContentRef.current;
+    if (m === "original" || !c) return;
+    tab[m] = c;
   }
 
   const processWithLLM = useCallback((sourceContent: string, targetMode: Mode) => {
@@ -173,15 +178,16 @@ export default function App() {
     bump();
 
     const tabId = currentTabIdRef.current;
-    L(`requestExtraction scheduled for tab ${tabId}`);
+    const id = ++extractIdRef.current;
+    L(`requestExtraction scheduled for tab ${tabId} (id=${id})`);
 
     extractTimerRef.current = setTimeout(() => {
       extractTimerRef.current = null;
-      L(`requestExtraction executing for tab ${tabId}`);
+      if (extractIdRef.current !== id) return;
+      L(`requestExtraction executing for tab ${tabId} (id=${id})`);
       extractFromTab(tabId).then((data) => {
-        if (currentTabIdRef.current !== tabId) {
-          L(`extraction done for tab ${tabId} but current is now ${currentTabIdRef.current} — discard`);
-          extractingRef.current = false;
+        if (extractIdRef.current !== id) {
+          L(`extraction done id=${id} but current id=${extractIdRef.current} — discard`);
           return;
         }
         extractingRef.current = false;
@@ -231,11 +237,16 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    chrome.storage.sync.get(null, (stored) => {
+    const SECRET_KEYS: (keyof Settings)[] = ["llmApiKey", "ttsApiKey"];
+    chrome.storage.sync.get(null, (synced) => {
       if (chrome.runtime.lastError) return;
-      if (stored && Object.keys(stored).length > 0) {
-        setSettings({ ...DEFAULT_SETTINGS, ...stored } as Settings);
-      }
+      chrome.storage.local.get(SECRET_KEYS, (local) => {
+        if (chrome.runtime.lastError) return;
+        const merged = { ...(synced || {}), ...(local || {}) };
+        if (merged && Object.keys(merged).length > 0) {
+          setSettings({ ...DEFAULT_SETTINGS, ...merged } as Settings);
+        }
+      });
     });
   }, []);
 
@@ -275,6 +286,12 @@ export default function App() {
     };
     chrome.tabs.onActivated.addListener(onActivated);
 
+    const onRemoved = (tabId: number) => {
+      panelTabIdsRef.current.delete(tabId);
+      cacheRef.current.delete(tabId);
+    };
+    chrome.tabs.onRemoved.addListener(onRemoved);
+
     const onNav = (details: { tabId: number; frameId: number; url: string }) => {
       if (details.frameId !== 0) return;
       if (!panelTabIdsRef.current.has(details.tabId)) return;
@@ -299,6 +316,7 @@ export default function App() {
     return () => {
       chrome.tabs.onUpdated.removeListener(onUpdated);
       chrome.tabs.onActivated.removeListener(onActivated);
+      chrome.tabs.onRemoved.removeListener(onRemoved);
       chrome.webNavigation.onCompleted.removeListener(onNav);
       chrome.webNavigation.onHistoryStateUpdated.removeListener(onNav);
       chrome.webNavigation.onReferenceFragmentUpdated.removeListener(onNav);
@@ -349,7 +367,9 @@ export default function App() {
 
   const handleSettingsSave = useCallback((newSettings: Settings) => {
     setSettings(newSettings);
-    chrome.storage.sync.set(newSettings as unknown as Record<string, unknown>);
+    const { llmApiKey, ttsApiKey, ...synced } = newSettings as unknown as Record<string, unknown>;
+    chrome.storage.sync.set(synced);
+    chrome.storage.local.set({ llmApiKey, ttsApiKey });
   }, []);
 
   const handleCopyRichText = useCallback(async () => {

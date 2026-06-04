@@ -69,7 +69,7 @@ export function useLLM(settings: Settings) {
         }));
       };
 
-      clientRef.current!.stream(prompt, systemPrompt, onChunk, abortController.signal);
+      clientRef.current?.stream(prompt, systemPrompt, onChunk, abortController.signal);
     },
     []
   );
