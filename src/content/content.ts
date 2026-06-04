@@ -1,5 +1,71 @@
 import { Readability, isProbablyReaderable } from "@mozilla/readability";
 
+declare global {
+  interface Element {
+    getInnerHTML(options?: { includeShadowRoots?: boolean }): string;
+  }
+}
+
+function buildDocumentWithShadowDOM(): Document {
+  const body = document.body as HTMLElement;
+  if (typeof body.getInnerHTML === "function") {
+    const html = body.getInnerHTML({ includeShadowRoots: true });
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const base = document.createElement("base");
+    base.href = document.baseURI;
+    doc.head.prepend(base);
+    return doc;
+  }
+  return document.cloneNode(true) as Document;
+}
+
+function htmlToText(html: string): string {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const walker = document.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const tag = (node as Element).tagName;
+        const hidden = (node as HTMLElement).hidden || (node as HTMLElement).style?.display === "none";
+        if (hidden || tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT") return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+
+  const blocks = new Set(["P", "DIV", "BR", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "TR", "BLOCKQUOTE", "HR", "FIGCAPTION", "DT", "DD", "SECTION", "ARTICLE", "HEADER", "FOOTER", "DETAILS", "SUMMARY"]);
+  const inlinesNeedingSpace = new Set(["A", "SPAN", "B", "I", "EM", "STRONG", "CODE", "MARK", "SMALL", "SUB", "SUP"]);
+
+  const parts: string[] = [];
+  let prevWasBlock = false;
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as HTMLElement;
+      if (blocks.has(el.tagName)) {
+        if (!prevWasBlock && parts.length > 0) parts.push("\n");
+        prevWasBlock = true;
+      } else if (inlinesNeedingSpace.has(el.tagName) && parts.length > 0) {
+        const last = parts[parts.length - 1];
+        if (last && !last.endsWith(" ") && !last.endsWith("\n")) parts.push(" ");
+      }
+    } else if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent || "";
+      const trimmed = text.replace(/\s+/g, " ");
+      if (trimmed && trimmed !== " ") {
+        parts.push(trimmed);
+        prevWasBlock = false;
+      }
+    }
+  }
+
+  return parts
+    .join("")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 async function extractContent(): Promise<{ title: string; content: string; url: string }> {
   const title = document.title || "";
   const url = window.location.href;
@@ -7,14 +73,16 @@ async function extractContent(): Promise<{ title: string; content: string; url: 
   let content = "";
 
   try {
-    const doc = document.cloneNode(true) as Document;
+    const doc = buildDocumentWithShadowDOM();
     const reader = new Readability(doc);
     const article = reader.parse();
-    if (article) {
-      content = article.textContent || "";
+    if (article?.content) {
+      content = htmlToText(article.content);
+    } else if (article?.textContent) {
+      content = article.textContent;
     }
-  } catch (e) {
-    // fallback
+  } catch {
+    // fallback below
   }
 
   if (!content) {
@@ -32,11 +100,10 @@ async function extractContent(): Promise<{ title: string; content: string; url: 
     content = document.body.textContent || "";
   }
 
-  content = content.replace(/[\u{1F000}-\u{1FFFF}]|[\u{2600}-\u{27BF}]|[\u{FE00}-\u{FE0F}]|[\u{1F900}-\u{1F9FF}]|[\u{1FA00}-\u{1FA6F}]|[\u{1FA70}-\u{1FAFF}]|[\u{2702}-\u{27B0}]|[\u{24C2}-\u{1F251}]|\u{200D}|\u{FE0F}/gu, "");
   content = content
     .split("\n")
     .map(l => l.replace(/\s+/g, " ").trim())
-    .filter(l => l.length === 0 || l.length > 20)
+    .filter(l => l.length > 0)
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -110,21 +177,13 @@ function waitForReadableContent(timeout = 3000, interval = 500): Promise<void> {
   });
 }
 
-let extracting = false;
-
 if (isContextValid()) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === "REQUEST_EXTRACTION") {
-      if (extracting) {
-        sendResponse({ type: "CONTENT_EXTRACTED", data: { title: "", content: "", url: "" } });
-        return false;
-      }
-      extracting = true;
       waitForDocumentReady()
         .then(() => waitForReadableContent())
         .then(() => extractContent())
         .then((result) => {
-          extracting = false;
           try {
             sendResponse({ type: "CONTENT_EXTRACTED", data: result });
           } catch {
@@ -132,7 +191,6 @@ if (isContextValid()) {
           }
         })
         .catch(() => {
-          extracting = false;
           try {
             sendResponse({ type: "CONTENT_EXTRACTED", data: { title: "", content: "", url: "" } });
           } catch {
