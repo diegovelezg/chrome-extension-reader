@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useReducer } from "react";
 import { Mode, Settings, DEFAULT_SETTINGS, ExtractedContent, CONTENT_SCRIPT_PATH } from "../types";
 import { useLLM } from "../lib/useLLM";
 import { useTTS } from "../lib/useTTS";
+import { isSupportedUrl } from "../lib/utils";
 import { BookOpen, CaseUpper, Copy, Loader2, Minus, Plus, RefreshCw, Settings as SettingsIcon, TextSelect } from "lucide-react";
 import { ModeSelector } from "../components/ModeSelector";
 import { Markdown } from "../components/Markdown";
@@ -9,6 +10,8 @@ import { TTSControls } from "../components/TTSControls";
 import { SettingsPanel } from "../components/SettingsPanel";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
+
+const L = (msg: string, ...args: unknown[]) => console.warn(`[SP] ${msg}`, ...args);
 
 interface TabData {
   original: string;
@@ -28,6 +31,10 @@ function hash(s: string): string {
     h = ((h << 5) - h + s.charCodeAt(i)) | 0;
   }
   return h.toString(36);
+}
+
+function normalizeContent(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
 }
 
 function extractFromTab(tabId: number): Promise<ExtractedContent | null> {
@@ -86,13 +93,16 @@ export default function App() {
   const tts = useTTS(settings);
 
   const tabRef = useRef<TabData>(emptyTab());
+  const cacheRef = useRef(new Map<number, TabData>());
+  const currentTabIdRef = useRef<number | null>(null);
+  const panelTabIdsRef = useRef(new Set<number>());
   const llmCacheRef = useRef<Map<string, string>>(new Map());
   const contentRef = useRef<HTMLDivElement>(null);
   const modeRef = useRef(mode);
   modeRef.current = mode;
-  const pinnedTabIdRef = useRef<number | null>(null);
   const processWithLLMRef = useRef<(sourceContent: string, targetMode: Mode) => void>(null!);
   const extractingRef = useRef(false);
+  const extractTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const tab = tabRef.current;
   const isExtracting = extractingRef.current;
@@ -123,38 +133,81 @@ export default function App() {
   }, [settings, setLlmContent, startStream]);
   processWithLLMRef.current = processWithLLM;
 
-  function normalizeContent(s: string): string {
-    return s.replace(/\s+/g, " ").trim();
+  function switchToTab(tabId: number) {
+    L(`switchToTab(${tabId}), current=${currentTabIdRef.current}`);
+
+    if (currentTabIdRef.current !== null && tabRef.current.original) {
+      cacheRef.current.set(currentTabIdRef.current, { ...tabRef.current });
+    }
+
+    currentTabIdRef.current = tabId;
+
+    const cached = cacheRef.current.get(tabId);
+    if (cached) {
+      L(`switchToTab: loading from cache, original=${cached.original.length} chars`);
+      tabRef.current = { ...cached };
+    } else {
+      L(`switchToTab: no cache, empty tab`);
+      tabRef.current = emptyTab();
+    }
+
+    clearContent();
+    if (tabRef.current.original && modeRef.current !== "original") {
+      const field = modeRef.current as keyof TabData;
+      if (tabRef.current[field]) {
+        setLlmContent(tabRef.current[field] as string);
+      } else {
+        processWithLLMRef.current(tabRef.current.original, modeRef.current);
+      }
+    }
+    bump();
   }
 
   function requestExtraction() {
-    if (extractingRef.current) return;
-    if (pinnedTabIdRef.current === null) return;
+    if (currentTabIdRef.current === null) return;
+    if (extractTimerRef.current) clearTimeout(extractTimerRef.current);
     extractingRef.current = true;
-    tab.original = "";
-    tab.title = "";
+    tabRef.current.original = "";
+    tabRef.current.title = "";
     clearContent();
     bump();
 
-    extractFromTab(pinnedTabIdRef.current).then((data) => {
-      extractingRef.current = false;
-      if (!data) { bump(); return; }
-      const newContent = data.content || "";
+    const tabId = currentTabIdRef.current;
+    L(`requestExtraction scheduled for tab ${tabId}`);
 
-      const isNewContent = normalizeContent(tab.original) !== normalizeContent(newContent);
-      tab.original = newContent;
-      tab.title = data.title;
-      if (isNewContent) {
-        tab.selectedText = "";
-        tab.executive = "";
-        tab.distilled = "";
-      }
+    extractTimerRef.current = setTimeout(() => {
+      extractTimerRef.current = null;
+      L(`requestExtraction executing for tab ${tabId}`);
+      extractFromTab(tabId).then((data) => {
+        if (currentTabIdRef.current !== tabId) {
+          L(`extraction done for tab ${tabId} but current is now ${currentTabIdRef.current} — discard`);
+          extractingRef.current = false;
+          return;
+        }
+        extractingRef.current = false;
+        if (!data) { bump(); return; }
+        const newContent = data.content || "";
 
-      bump();
-      if (isNewContent && modeRef.current !== "original" && newContent) {
-        processWithLLMRef.current(newContent, modeRef.current);
-      }
-    });
+        const isNewContent = normalizeContent(tabRef.current.original) !== normalizeContent(newContent);
+        tabRef.current.original = newContent;
+        tabRef.current.title = data.title;
+        if (isNewContent) {
+          tabRef.current.selectedText = "";
+          tabRef.current.executive = "";
+          tabRef.current.distilled = "";
+        }
+
+        if (tabRef.current.original) {
+          cacheRef.current.set(tabId, { ...tabRef.current });
+        }
+
+        L(`extraction done: ${newContent.length} chars, isNew=${isNewContent}`);
+        bump();
+        if (isNewContent && modeRef.current !== "original" && newContent) {
+          processWithLLMRef.current(newContent, modeRef.current);
+        }
+      });
+    }, 150);
   }
 
   function loadModeContent(targetMode: Mode) {
@@ -189,7 +242,7 @@ export default function App() {
   useEffect(() => {
     const handler = (message: { type: string; data?: unknown }, _sender: { tab?: { id?: number } }) => {
       if (message.type === "SELECTION_DETECTED") {
-        if (_sender.tab?.id !== pinnedTabIdRef.current) return;
+        if (_sender.tab?.id !== currentTabIdRef.current) return;
         const data = message.data as { text: string; url: string };
         tab.selectedText = data.text;
         bump();
@@ -205,55 +258,71 @@ export default function App() {
 
   useEffect(() => {
     const onUpdated = (tabId: number, changeInfo: { status?: string }, _tab: unknown) => {
-      if (tabId !== pinnedTabIdRef.current) return;
+      if (!panelTabIdsRef.current.has(tabId)) return;
+      if (tabId !== currentTabIdRef.current) return;
       if (changeInfo.status === "complete") {
+        L(`tabs.onUpdated tabId=${tabId} status=complete → re-extract`);
         requestExtraction();
       }
     };
     chrome.tabs.onUpdated.addListener(onUpdated);
 
+    const onActivated = ({ tabId }: { tabId: number }) => {
+      L(`tabs.onActivated tabId=${tabId}, current=${currentTabIdRef.current}, isPanel=${panelTabIdsRef.current.has(tabId)}`);
+      if (!panelTabIdsRef.current.has(tabId)) return;
+      if (tabId === currentTabIdRef.current) return;
+      switchToTab(tabId);
+    };
+    chrome.tabs.onActivated.addListener(onActivated);
+
+    const onNav = (details: { tabId: number; frameId: number; url: string }) => {
+      if (details.frameId !== 0) return;
+      if (!panelTabIdsRef.current.has(details.tabId)) return;
+      if (details.tabId !== currentTabIdRef.current) return;
+      if (!isSupportedUrl(details.url)) return;
+      L(`webNavigation tabId=${details.tabId} url=${details.url}`);
+      requestExtraction();
+    };
+    chrome.webNavigation.onCompleted.addListener(onNav);
+    chrome.webNavigation.onHistoryStateUpdated.addListener(onNav);
+    chrome.webNavigation.onReferenceFragmentUpdated.addListener(onNav);
+
     chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
       const tabId = tabs[0]?.id;
+      L(`initial tabs.query => tabId=${tabId}`);
       if (!tabId) return;
-      pinnedTabIdRef.current = tabId;
+      panelTabIdsRef.current.add(tabId);
+      currentTabIdRef.current = tabId;
       requestExtraction();
     });
 
     return () => {
       chrome.tabs.onUpdated.removeListener(onUpdated);
+      chrome.tabs.onActivated.removeListener(onActivated);
+      chrome.webNavigation.onCompleted.removeListener(onNav);
+      chrome.webNavigation.onHistoryStateUpdated.removeListener(onNav);
+      chrome.webNavigation.onReferenceFragmentUpdated.removeListener(onNav);
     };
   }, []);
 
   useEffect(() => {
     const onOpened = (info: { tabId?: number }) => {
       const tabId = info.tabId;
+      L(`sidePanel.onOpened tabId=${tabId}, current=${currentTabIdRef.current}`);
       if (!tabId) return;
-      pinnedTabIdRef.current = tabId;
-      if (tabRef.current.original) return;
-      clearContent();
-      tts.stop();
-      bump();
-      extractFromTab(tabId).then((data) => {
-        extractingRef.current = false;
-        if (!data) { bump(); return; }
-        const newContent = data.content || "";
-        const isNew = normalizeContent(tabRef.current.original) !== normalizeContent(newContent);
-        tabRef.current.original = newContent;
-        tabRef.current.title = data.title;
-        if (isNew) {
-          tabRef.current.selectedText = "";
-          tabRef.current.executive = "";
-          tabRef.current.distilled = "";
-        }
-        bump();
-        if (isNew && modeRef.current !== "original" && newContent) {
-          processWithLLMRef.current(newContent, modeRef.current);
-        }
-      });
+      panelTabIdsRef.current.add(tabId);
+      if (tabId === currentTabIdRef.current && tabRef.current.original) {
+        L(`onOpened: same tab, has content — skip`);
+        return;
+      }
+      switchToTab(tabId);
+      if (!tabRef.current.original) {
+        requestExtraction();
+      }
     };
     chrome.sidePanel.onOpened.addListener(onOpened);
     return () => chrome.sidePanel.onOpened.removeListener(onOpened);
-  }, [clearContent, tts]);
+  }, [clearContent]);
 
   const handleModeChange = useCallback((newMode: Mode) => {
     saveCurrentLlm();
@@ -275,7 +344,7 @@ export default function App() {
 
   const handlePlayTTS = useCallback(() => {
     const text = streamedContent || tab.selectedText || tab.original || "";
-    if (text && pinnedTabIdRef.current !== null) tts.play(text, pinnedTabIdRef.current);
+    if (text && currentTabIdRef.current !== null) tts.play(text, currentTabIdRef.current);
   }, [streamedContent, tts]);
 
   const handleSettingsSave = useCallback((newSettings: Settings) => {
