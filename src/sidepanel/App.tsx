@@ -489,8 +489,16 @@ export default function App() {
           </div>
         ) : !displayContent ? (
           <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground">
-            <BookOpen className="size-16 mb-4 text-muted-foreground/50" />
-            <p className="text-sm text-center">Navigate to a page and click the extension icon</p>
+            {mode !== "original" && error ? (
+              <p className="text-sm text-center px-4">{error}</p>
+            ) : (
+              <>
+                <BookOpen className="size-16 mb-4 text-muted-foreground/50" />
+                <p className="text-sm text-center px-4">
+                  If the page couldn't be read automatically, or you only want a portion, select the text you're interested in.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <>

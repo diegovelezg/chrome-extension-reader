@@ -1,5 +1,19 @@
 import { Readability, isProbablyReaderable } from "@mozilla/readability";
 
+function flattenShadowRoots(live: Element, clone: Element) {
+  const sr = (live as any).shadowRoot as ShadowRoot | null | undefined;
+  if (sr) {
+    for (const child of Array.from(sr.childNodes) as Node[]) {
+      clone.appendChild(clone.ownerDocument.importNode(child, true));
+    }
+  }
+  const liveKids = Array.from(live.children);
+  const cloneKids = Array.from(clone.children);
+  for (let i = 0; i < liveKids.length && i < cloneKids.length; i++) {
+    flattenShadowRoots(liveKids[i], cloneKids[i]);
+  }
+}
+
 async function extractContent(): Promise<{ title: string; content: string; url: string }> {
   const title = document.title || "";
   const url = window.location.href;
@@ -8,6 +22,7 @@ async function extractContent(): Promise<{ title: string; content: string; url: 
 
   try {
     const doc = document.cloneNode(true) as Document;
+    flattenShadowRoots(document.body, doc.body);
     const reader = new Readability(doc);
     const article = reader.parse();
     content = article?.textContent || "";
@@ -15,9 +30,8 @@ async function extractContent(): Promise<{ title: string; content: string; url: 
     // fallback below
   }
 
-  const liveText = document.body.innerText || "";
-  if (liveText.length > content.length * 3) {
-    content = liveText;
+  if (content.length < 500) {
+    content = document.body.innerText || "";
   }
 
   content = content
