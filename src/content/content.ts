@@ -1,36 +1,23 @@
 import { Readability, isProbablyReaderable } from "@mozilla/readability";
 
-function L(msg: string, ...args: unknown[]) { console.warn(`[CS] ${msg}`, ...args); }
-
 async function extractContent(): Promise<{ title: string; content: string; url: string }> {
-  const url = window.location.href;
-  L(`extractContent() start url=${url} readyState=${document.readyState}`);
-
   const title = document.title || "";
-  const _url = url;
+  const url = window.location.href;
 
   let content = "";
-  let readabilityLen = 0;
 
   try {
     const doc = document.cloneNode(true) as Document;
     const reader = new Readability(doc);
     const article = reader.parse();
     content = article?.textContent || "";
-    readabilityLen = content.length;
-    L(`Readability result: ${readabilityLen} chars, title="${article?.title || ""}"`);
-  } catch (e) {
-    L(`Readability FAILED: ${(e as Error).message}`);
+  } catch {
+    // fallback below
   }
 
   const liveText = document.body.innerText || "";
-  L(`innerText result: ${liveText.length} chars (vs readability ${readabilityLen})`);
-
   if (liveText.length > content.length * 3) {
-    L(`→ using innerText (3x rule: ${liveText.length} > ${readabilityLen * 3})`);
     content = liveText;
-  } else {
-    L(`→ using Readability result`);
   }
 
   content = content
@@ -41,8 +28,7 @@ async function extractContent(): Promise<{ title: string; content: string; url: 
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  L(`extractContent() done: title="${title}" finalLen=${content.length}`);
-  return { title, content, url: _url };
+  return { title, content, url };
 }
 
 function isContextValid(): boolean {
@@ -90,7 +76,6 @@ function waitForDocumentReady(): Promise<void> {
 }
 
 function waitForReadableContent(timeout = 5000, interval = 300): Promise<void> {
-  const start = Date.now();
   const check = () => {
     try {
       return isProbablyReaderable(document, { minContentLength: 140, minScore: 20 });
@@ -99,22 +84,13 @@ function waitForReadableContent(timeout = 5000, interval = 300): Promise<void> {
     }
   };
 
-  if (check()) {
-    L(`waitForReadableContent: immediately ready`);
-    return Promise.resolve();
-  }
+  if (check()) return Promise.resolve();
 
-  L(`waitForReadableContent: not ready, polling (timeout=${timeout}ms)`);
   return new Promise((resolve) => {
     const deadline = Date.now() + timeout;
     const timer = setInterval(() => {
-      if (check()) {
+      if (check() || Date.now() >= deadline) {
         clearInterval(timer);
-        L(`waitForReadableContent: ready after ${Date.now() - start}ms`);
-        resolve();
-      } else if (Date.now() >= deadline) {
-        clearInterval(timer);
-        L(`waitForReadableContent: timeout after ${timeout}ms`);
         resolve();
       }
     }, interval);
@@ -124,21 +100,17 @@ function waitForReadableContent(timeout = 5000, interval = 300): Promise<void> {
 if (isContextValid()) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === "REQUEST_EXTRACTION") {
-      L(`REQUEST_EXTRACTION received url=${window.location.href}`);
       waitForDocumentReady()
-        .then(() => L(`document ready, waiting for readable content`))
         .then(() => waitForReadableContent())
         .then(() => extractContent())
         .then((result) => {
-          L(`extraction complete, sending response: ${result.content.length}chars`);
           try {
             sendResponse({ type: "CONTENT_EXTRACTED", data: result });
           } catch {
             // Extension context invalidated; ignore.
           }
         })
-        .catch((e) => {
-          L(`extraction FAILED: ${(e as Error)?.message || e}`);
+        .catch(() => {
           try {
             sendResponse({ type: "CONTENT_EXTRACTED", data: { title: "", content: "", url: "" } });
           } catch {

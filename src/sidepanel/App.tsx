@@ -11,7 +11,7 @@ import { SettingsPanel } from "../components/SettingsPanel";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
 
-const L = (msg: string, ...args: unknown[]) => console.warn(`[SP] ${msg}`, ...args);
+const L = (_msg: string, ..._args: unknown[]) => {};
 
 interface TabData {
   original: string;
@@ -43,7 +43,6 @@ function extractFromTab(tabId: number): Promise<ExtractedContent | null> {
     const done = (value: ExtractedContent | null) => {
       if (settled) return;
       settled = true;
-      console.warn(`[SP] extractFromTab(${tabId}) done: ${value ? `${value.content.length}chars title="${value.title}"` : "null"}`);
       resolve(value);
     };
 
@@ -53,7 +52,6 @@ function extractFromTab(tabId: number): Promise<ExtractedContent | null> {
       if (settled) return;
       clearTimeout(timer);
       if (chrome.runtime.lastError) {
-        console.warn(`[SP] extractFromTab(${tabId}) no content script, injecting...`);
         chrome.scripting.executeScript({ target: { tabId }, files: [CONTENT_SCRIPT_PATH] }, () => {
           if (chrome.runtime.lastError) {
             done(null);
