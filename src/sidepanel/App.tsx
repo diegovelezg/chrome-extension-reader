@@ -11,10 +11,7 @@ import { SettingsPanel } from "../components/SettingsPanel";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
 
-const L = (msg: string, ...args: unknown[]) => {
-  const ts = new Date().toISOString().slice(11, 23);
-  console.warn(`[SP ${ts}] ${msg}`, ...args);
-};
+const L = (msg: string, ...args: unknown[]) => console.warn(`[SP] ${msg}`, ...args);
 
 interface TabData {
   original: string;
@@ -46,6 +43,7 @@ function extractFromTab(tabId: number): Promise<ExtractedContent | null> {
     const done = (value: ExtractedContent | null) => {
       if (settled) return;
       settled = true;
+      console.warn(`[SP] extractFromTab(${tabId}) done: ${value ? `${value.content.length}chars title="${value.title}"` : "null"}`);
       resolve(value);
     };
 
@@ -55,6 +53,7 @@ function extractFromTab(tabId: number): Promise<ExtractedContent | null> {
       if (settled) return;
       clearTimeout(timer);
       if (chrome.runtime.lastError) {
+        console.warn(`[SP] extractFromTab(${tabId}) no content script, injecting...`);
         chrome.scripting.executeScript({ target: { tabId }, files: [CONTENT_SCRIPT_PATH] }, () => {
           if (chrome.runtime.lastError) {
             done(null);
@@ -142,10 +141,9 @@ export default function App() {
   processWithLLMRef.current = processWithLLM;
 
   function switchToTab(tabId: number) {
-    L(`switchToTab: ${currentTabIdRef.current} → ${tabId}`);
+    L(`switchToTab(${tabId}), current=${currentTabIdRef.current}`);
 
     if (currentTabIdRef.current !== null && tabRef.current.original) {
-      L(`switchToTab: guardando cache tab=${currentTabIdRef.current} (${tabRef.current.original.length} chars)`);
       cacheRef.current.set(currentTabIdRef.current, { ...tabRef.current });
     }
 
@@ -153,10 +151,10 @@ export default function App() {
 
     const cached = cacheRef.current.get(tabId);
     if (cached) {
-      L(`switchToTab: cargando cache tab=${tabId} (${cached.original.length} chars)`);
+      L(`switchToTab: loading from cache, original=${cached.original.length} chars`);
       tabRef.current = { ...cached };
     } else {
-      L(`switchToTab: sin cache tab=${tabId}, tab vacio`);
+      L(`switchToTab: no cache, empty tab`);
       tabRef.current = emptyTab();
     }
 
@@ -174,49 +172,37 @@ export default function App() {
 
   function requestExtraction(silent = false) {
     if (currentTabIdRef.current === null) return;
-    if (extractTimerRef.current) {
-      L(`requestExtraction: cancelando timer previo`);
-      clearTimeout(extractTimerRef.current);
-    }
+    L(`requestExtraction(tabId=${currentTabIdRef.current}, silent=${silent}) — prevOriginal=${tabRef.current.original.length}chars`);
+    if (extractTimerRef.current) clearTimeout(extractTimerRef.current);
     extractingRef.current = true;
 
     if (!silent) {
-      L(`requestExtraction: LIMPIANDO contenido previo (silent=false)`);
       tabRef.current.original = "";
       tabRef.current.title = "";
       clearContent();
-    } else {
-      L(`requestExtraction: MANTENIENDO contenido previo (silent=true, current=${tabRef.current.original.length} chars)`);
     }
 
     bump();
 
     const tabId = currentTabIdRef.current;
     const id = ++extractIdRef.current;
-    L(`requestExtraction: agendado para tab ${tabId} (id=${id}, silent=${silent})`);
 
     extractTimerRef.current = setTimeout(() => {
       extractTimerRef.current = null;
-      if (extractIdRef.current !== id) {
-        L(`requestExtraction: id=${id} cancelado (current id=${extractIdRef.current})`);
-        return;
-      }
-      L(`requestExtraction: EJECUTANDO extraccion tab ${tabId} (id=${id})`);
+      if (extractIdRef.current !== id) return;
+      L(`extraction FIRE tabId=${tabId} id=${id}`);
       extractFromTab(tabId).then((data) => {
+        L(`extraction RETURNED tabId=${tabId} id=${id} data=${data ? `${data.content.length}chars title="${data.title}"` : "null"}`);
         if (extractIdRef.current !== id) {
-          L(`extraction done: id=${id} DESCARTADO (current id=${extractIdRef.current})`);
+          L(`extraction DISCARD id=${id} currentId=${extractIdRef.current}`);
           return;
         }
         extractingRef.current = false;
-        if (!data) {
-          L(`extraction done: id=${id} SIN DATOS`);
-          bump();
-          return;
-        }
+        if (!data) { bump(); return; }
         const newContent = data.content || "";
-        const isNewContent = normalizeContent(tabRef.current.original) !== normalizeContent(newContent);
-        L(`extraction done: id=${id} tab=${tabId} chars=${newContent.length} isNew=${isNewContent} title="${data.title?.slice(0, 50)}"`);
 
+        const isNewContent = normalizeContent(tabRef.current.original) !== normalizeContent(newContent);
+        const prevLen = tabRef.current.original.length;
         tabRef.current.original = newContent;
         tabRef.current.title = data.title;
         if (isNewContent) {
@@ -229,6 +215,7 @@ export default function App() {
           cacheRef.current.set(tabId, { ...tabRef.current });
         }
 
+        L(`extraction APPLIED tabId=${tabId} id=${id} prev=${prevLen}chars new=${newContent.length}chars isNew=${isNewContent}`);
         bump();
         if (isNewContent && modeRef.current !== "original" && newContent) {
           processWithLLMRef.current(newContent, modeRef.current);
@@ -289,18 +276,18 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const onUpdated = (tabId: number, changeInfo: { status?: string; url?: string }, _tab: unknown) => {
+    const onUpdated = (tabId: number, changeInfo: { status?: string }, _tab: unknown) => {
       if (!panelTabIdsRef.current.has(tabId)) return;
       if (tabId !== currentTabIdRef.current) return;
-      L(`tabs.onUpdated: tab=${tabId} status=${changeInfo.status} url=${changeInfo.url}`);
       if (changeInfo.status === "complete") {
+        L(`tabs.onUpdated tabId=${tabId} status=complete → re-extract`);
         requestExtraction(true);
       }
     };
     chrome.tabs.onUpdated.addListener(onUpdated);
 
     const onActivated = ({ tabId }: { tabId: number }) => {
-      L(`tabs.onActivated: tab=${tabId}, current=${currentTabIdRef.current}, isPanel=${panelTabIdsRef.current.has(tabId)}`);
+      L(`tabs.onActivated tabId=${tabId}, current=${currentTabIdRef.current}, isPanel=${panelTabIdsRef.current.has(tabId)}`);
       if (!panelTabIdsRef.current.has(tabId)) return;
       if (tabId === currentTabIdRef.current) return;
       switchToTab(tabId);
@@ -318,7 +305,7 @@ export default function App() {
       if (!panelTabIdsRef.current.has(details.tabId)) return;
       if (details.tabId !== currentTabIdRef.current) return;
       if (!isSupportedUrl(details.url)) return;
-      L(`webNavigation: tab=${details.tabId} url=${details.url}`);
+      L(`webNavigation tabId=${details.tabId} url=${details.url}`);
       requestExtraction(true);
     };
     chrome.webNavigation.onCompleted.addListener(onNav);
@@ -327,7 +314,7 @@ export default function App() {
 
     chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
       const tabId = tabs[0]?.id;
-      L(`INIT tabs.query: tab=${tabId} url=${tabs[0]?.url}`);
+      L(`initial tabs.query => tabId=${tabId}`);
       if (!tabId) return;
       panelTabIdsRef.current.add(tabId);
       currentTabIdRef.current = tabId;
@@ -347,11 +334,11 @@ export default function App() {
   useEffect(() => {
     const onOpened = (info: { tabId?: number }) => {
       const tabId = info.tabId;
-      L(`sidePanel.onOpened: tab=${tabId}, current=${currentTabIdRef.current}, hasContent=${!!tabRef.current.original}`);
+      L(`sidePanel.onOpened tabId=${tabId}, current=${currentTabIdRef.current}`);
       if (!tabId) return;
       panelTabIdsRef.current.add(tabId);
       if (tabId === currentTabIdRef.current && tabRef.current.original) {
-        L(`onOpened: mismo tab con contenido — skip`);
+        L(`onOpened: same tab, has content — skip`);
         return;
       }
       switchToTab(tabId);
