@@ -1,5 +1,7 @@
 import { Readability, isProbablyReaderable } from "@mozilla/readability";
 
+const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "LINK", "SVG", "CANVAS", "IFRAME", "TEMPLATE"]);
+
 function cloneComposed(node: Node, dest: Document): Node {
   if (node.nodeType === Node.TEXT_NODE) {
     return dest.createTextNode(node.textContent || "");
@@ -9,6 +11,8 @@ function cloneComposed(node: Node, dest: Document): Node {
   }
 
   const el = node as Element;
+  if (SKIP_TAGS.has(el.tagName)) return dest.createTextNode("");
+
   const clone = dest.createElement(el.tagName);
   for (const attr of Array.from(el.attributes)) {
     try { clone.setAttribute(attr.name, attr.value); } catch {}
@@ -102,7 +106,6 @@ async function extractContent(): Promise<{ title: string; content: string; url: 
 
   try {
     const doc = buildDocumentWithShadowDOM();
-    doc.querySelectorAll("script, style, noscript, link").forEach(el => el.remove());
     const reader = new Readability(doc);
     const article = reader.parse();
     if (article?.content) {
