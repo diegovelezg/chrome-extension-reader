@@ -11,7 +11,7 @@ import { SettingsPanel } from "../components/SettingsPanel";
 import { Button } from "../components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
 
-const L = (_msg: string, ..._args: unknown[]) => {};
+const L = (msg: string, ...args: unknown[]) => console.warn(`[SP] ${msg}`, ...args);
 
 interface TabData {
   original: string;

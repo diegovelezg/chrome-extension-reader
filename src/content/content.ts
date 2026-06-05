@@ -1,5 +1,7 @@
 import { Readability, isProbablyReaderable } from "@mozilla/readability";
 
+function L(msg: string, ...args: unknown[]) { console.warn(`[CS] ${msg}`, ...args); }
+
 function flattenShadowRoots(live: Element, clone: Element) {
   const sr = (live as any).shadowRoot as ShadowRoot | null | undefined;
   if (sr) {
@@ -15,10 +17,14 @@ function flattenShadowRoots(live: Element, clone: Element) {
 }
 
 async function extractContent(): Promise<{ title: string; content: string; url: string }> {
-  const title = document.title || "";
   const url = window.location.href;
+  L(`extractContent() start. window.location.href=${url} readyState=${document.readyState} title="${document.title}"`);
+
+  const title = document.title || "";
 
   let content = "";
+  let readabilityLen = 0;
+  let innerTextLen = 0;
 
   try {
     const doc = document.cloneNode(true) as Document;
@@ -26,12 +32,21 @@ async function extractContent(): Promise<{ title: string; content: string; url: 
     const reader = new Readability(doc);
     const article = reader.parse();
     content = article?.textContent || "";
-  } catch {
-    // fallback below
+    readabilityLen = content.length;
+    L(`Readability: ${readabilityLen} chars, articleTitle="${article?.title || ""}", hrefAtParse=${url}`);
+  } catch (e) {
+    L(`Readability FAILED: ${(e as Error).message}`);
   }
 
-  if (content.length < 500) {
-    content = document.body.innerText || "";
+  const liveText = document.body.innerText || "";
+  innerTextLen = liveText.length;
+  L(`innerText: ${innerTextLen} chars, hrefAtRead=${window.location.href}`);
+
+  if (liveText.length > content.length * 3) {
+    L(`→ using innerText (3x rule)`);
+    content = liveText;
+  } else {
+    L(`→ using Readability result`);
   }
 
   content = content
@@ -42,6 +57,7 @@ async function extractContent(): Promise<{ title: string; content: string; url: 
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
+  L(`extractContent() done. finalHref=${window.location.href} finalTitle="${title}" finalLen=${content.length}`);
   return { title, content, url };
 }
 
@@ -90,6 +106,7 @@ function waitForDocumentReady(): Promise<void> {
 }
 
 function waitForReadableContent(timeout = 5000, interval = 300): Promise<void> {
+  const start = Date.now();
   const check = () => {
     try {
       return isProbablyReaderable(document, { minContentLength: 140, minScore: 20 });
@@ -98,13 +115,22 @@ function waitForReadableContent(timeout = 5000, interval = 300): Promise<void> {
     }
   };
 
-  if (check()) return Promise.resolve();
+  if (check()) {
+    L(`waitForReadableContent: immediately ready, href=${window.location.href}`);
+    return Promise.resolve();
+  }
 
+  L(`waitForReadableContent: polling, href=${window.location.href}`);
   return new Promise((resolve) => {
     const deadline = Date.now() + timeout;
     const timer = setInterval(() => {
-      if (check() || Date.now() >= deadline) {
+      if (check()) {
         clearInterval(timer);
+        L(`waitForReadableContent: ready after ${Date.now() - start}ms, href=${window.location.href}`);
+        resolve();
+      } else if (Date.now() >= deadline) {
+        clearInterval(timer);
+        L(`waitForReadableContent: timeout after ${timeout}ms, href=${window.location.href}`);
         resolve();
       }
     }, interval);
@@ -114,17 +140,21 @@ function waitForReadableContent(timeout = 5000, interval = 300): Promise<void> {
 if (isContextValid()) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === "REQUEST_EXTRACTION") {
+      L(`REQUEST_EXTRACTION received. href=${window.location.href}`);
       waitForDocumentReady()
+        .then(() => L(`document ready. href=${window.location.href}`))
         .then(() => waitForReadableContent())
         .then(() => extractContent())
         .then((result) => {
+          L(`extraction complete. href=${window.location.href} contentLen=${result.content.length} title="${result.title}"`);
           try {
             sendResponse({ type: "CONTENT_EXTRACTED", data: result });
           } catch {
             // Extension context invalidated; ignore.
           }
         })
-        .catch(() => {
+        .catch((e) => {
+          L(`extraction FAILED: ${(e as Error)?.message || e}, href=${window.location.href}`);
           try {
             sendResponse({ type: "CONTENT_EXTRACTED", data: { title: "", content: "", url: "" } });
           } catch {
