@@ -80,6 +80,7 @@ async function extractContent(): Promise<{ title: string; content: string; url: 
 
   try {
     const doc = buildDocumentWithShadowDOM();
+    doc.querySelectorAll("script, style, noscript, link").forEach(el => el.remove());
     const reader = new Readability(doc);
     const article = reader.parse();
     if (article?.content) {
