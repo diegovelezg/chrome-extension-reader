@@ -99,6 +99,7 @@ export default function App() {
   const currentTabIdRef = useRef<number | null>(null);
   const panelTabIdsRef = useRef(new Set<number>());
   const llmCacheRef = useRef<Map<string, string>>(new Map());
+  const lastExtractedUrlRef = useRef<string>("");
   const contentRef = useRef<HTMLDivElement>(null);
   const modeRef = useRef(mode);
   modeRef.current = mode;
@@ -170,9 +171,14 @@ export default function App() {
     bump();
   }
 
-  function requestExtraction(silent = false) {
+  function requestExtraction(silent = false, url?: string) {
     if (currentTabIdRef.current === null) return;
-    L(`requestExtraction(tabId=${currentTabIdRef.current}, silent=${silent}) — prevOriginal=${tabRef.current.original.length}chars`);
+    if (url && url === lastExtractedUrlRef.current && silent) {
+      L(`requestExtraction SKIP — same URL already extracted: ${url}`);
+      return;
+    }
+    if (url) lastExtractedUrlRef.current = url;
+    L(`requestExtraction(tabId=${currentTabIdRef.current}, silent=${silent}, url=${url}) — prevOriginal=${tabRef.current.original.length}chars`);
     if (extractTimerRef.current) clearTimeout(extractTimerRef.current);
     extractingRef.current = true;
 
@@ -276,12 +282,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const onUpdated = (tabId: number, changeInfo: { status?: string }, _tab: unknown) => {
+    const onUpdated = (tabId: number, changeInfo: { status?: string }, tab: { url?: string }) => {
       if (!panelTabIdsRef.current.has(tabId)) return;
       if (tabId !== currentTabIdRef.current) return;
       if (changeInfo.status === "complete") {
-        L(`tabs.onUpdated tabId=${tabId} status=complete → re-extract`);
-        requestExtraction(true);
+        L(`tabs.onUpdated tabId=${tabId} status=complete url=${tab.url}`);
+        requestExtraction(true, tab.url);
       }
     };
     chrome.tabs.onUpdated.addListener(onUpdated);
@@ -306,18 +312,17 @@ export default function App() {
       if (details.tabId !== currentTabIdRef.current) return;
       if (!isSupportedUrl(details.url)) return;
       L(`webNavigation tabId=${details.tabId} url=${details.url}`);
-      requestExtraction(true);
+      requestExtraction(true, details.url);
     };
     chrome.webNavigation.onCompleted.addListener(onNav);
-    chrome.webNavigation.onHistoryStateUpdated.addListener(onNav);
-    chrome.webNavigation.onReferenceFragmentUpdated.addListener(onNav);
 
     chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
       const tabId = tabs[0]?.id;
       L(`initial tabs.query => tabId=${tabId}`);
       if (!tabId) return;
       panelTabIdsRef.current.add(tabId);
-      currentTabIdRef.current = tabId;
+    currentTabIdRef.current = tabId;
+    lastExtractedUrlRef.current = "";
       requestExtraction();
     });
 
@@ -326,8 +331,6 @@ export default function App() {
       chrome.tabs.onActivated.removeListener(onActivated);
       chrome.tabs.onRemoved.removeListener(onRemoved);
       chrome.webNavigation.onCompleted.removeListener(onNav);
-      chrome.webNavigation.onHistoryStateUpdated.removeListener(onNav);
-      chrome.webNavigation.onReferenceFragmentUpdated.removeListener(onNav);
     };
   }, []);
 
