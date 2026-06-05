@@ -19,16 +19,22 @@ function buildDocumentWithShadowDOM(): Document {
   return document.cloneNode(true) as Document;
 }
 
+const NAV_ROLES = new Set(["navigation", "banner", "search", "complementary", "contentinfo", "menu", "menubar", "toolbar", "tablist", "tab", "toolbar"]);
+
 function htmlToText(html: string): string {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const walker = document.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       if (node.nodeType === Node.ELEMENT_NODE) {
-        const tag = (node as Element).tagName;
-        const hidden = (node as HTMLElement).hidden || (node as HTMLElement).style?.display === "none";
-        if (hidden || tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT") return NodeFilter.FILTER_REJECT;
+        const el = node as HTMLElement;
+        const tag = el.tagName;
+        if (el.hidden || tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT") return NodeFilter.FILTER_REJECT;
+        if (tag === "NAV") return NodeFilter.FILTER_REJECT;
+        if (el.getAttribute("aria-hidden") === "true") return NodeFilter.FILTER_REJECT;
+        const role = el.getAttribute("role");
+        if (role && NAV_ROLES.has(role)) return NodeFilter.FILTER_REJECT;
       }
-      return NodeFilter.FILTER_ACCEPT;
+      return NodeFilter.SHOW_ALL;
     },
   });
 
