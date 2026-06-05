@@ -168,13 +168,17 @@ export default function App() {
     bump();
   }
 
-  function requestExtraction() {
+  function requestExtraction(silent = false) {
     if (currentTabIdRef.current === null) return;
     if (extractTimerRef.current) clearTimeout(extractTimerRef.current);
     extractingRef.current = true;
-    tabRef.current.original = "";
-    tabRef.current.title = "";
-    clearContent();
+
+    if (!silent) {
+      tabRef.current.original = "";
+      tabRef.current.title = "";
+      clearContent();
+    }
+
     bump();
 
     const tabId = currentTabIdRef.current;
@@ -273,7 +277,7 @@ export default function App() {
       if (tabId !== currentTabIdRef.current) return;
       if (changeInfo.status === "complete") {
         L(`tabs.onUpdated tabId=${tabId} status=complete → re-extract`);
-        requestExtraction();
+        requestExtraction(true);
       }
     };
     chrome.tabs.onUpdated.addListener(onUpdated);
@@ -298,7 +302,7 @@ export default function App() {
       if (details.tabId !== currentTabIdRef.current) return;
       if (!isSupportedUrl(details.url)) return;
       L(`webNavigation tabId=${details.tabId} url=${details.url}`);
-      requestExtraction();
+      requestExtraction(true);
     };
     chrome.webNavigation.onCompleted.addListener(onNav);
     chrome.webNavigation.onHistoryStateUpdated.addListener(onNav);

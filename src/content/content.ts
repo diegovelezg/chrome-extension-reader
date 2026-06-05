@@ -1,22 +1,44 @@
 import { Readability, isProbablyReaderable } from "@mozilla/readability";
 
-declare global {
-  interface Element {
-    getInnerHTML(options?: { includeShadowRoots?: boolean }): string;
+function cloneComposed(node: Node, dest: Document): Node {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return dest.createTextNode(node.textContent || "");
   }
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return dest.createTextNode("");
+  }
+
+  const el = node as Element;
+  const clone = dest.createElement(el.tagName);
+  for (const attr of Array.from(el.attributes)) {
+    try { clone.setAttribute(attr.name, attr.value); } catch {}
+  }
+
+  for (const child of Array.from(el.childNodes)) {
+    clone.appendChild(cloneComposed(child, dest));
+  }
+
+  const sr = (el as any).shadowRoot as ShadowRoot | null | undefined;
+  if (sr) {
+    for (const child of Array.from(sr.childNodes) as Node[]) {
+      clone.appendChild(cloneComposed(child, dest));
+    }
+  }
+
+  return clone;
 }
 
 function buildDocumentWithShadowDOM(): Document {
-  const body = document.body as HTMLElement;
-  if (typeof body.getInnerHTML === "function") {
-    const html = body.getInnerHTML({ includeShadowRoots: true });
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    const base = document.createElement("base");
-    base.href = document.baseURI;
-    doc.head.prepend(base);
-    return doc;
+  const doc = document.implementation.createHTMLDocument(document.title);
+  const base = doc.createElement("base");
+  base.href = document.baseURI;
+  doc.head.prepend(base);
+
+  for (const child of Array.from(document.body.childNodes)) {
+    doc.body.appendChild(cloneComposed(child, doc));
   }
-  return document.cloneNode(true) as Document;
+
+  return doc;
 }
 
 const NAV_ROLES = new Set(["navigation", "banner", "search", "complementary", "contentinfo", "menu", "menubar", "toolbar", "tablist", "tab", "toolbar"]);
@@ -162,7 +184,7 @@ function waitForDocumentReady(): Promise<void> {
   });
 }
 
-function waitForReadableContent(timeout = 3000, interval = 500): Promise<void> {
+function waitForReadableContent(timeout = 5000, interval = 300): Promise<void> {
   const check = () => {
     try {
       return isProbablyReaderable(document, { minContentLength: 140, minScore: 20 });
