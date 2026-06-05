@@ -2,12 +2,21 @@ import { Readability, isProbablyReaderable } from "@mozilla/readability";
 
 function L(msg: string, ...args: unknown[]) { console.warn(`[CS] ${msg}`, ...args); }
 
+let shadowRootCount = 0;
+let shadowRootNodesAppended = 0;
+let customElementCount = 0;
+
 function flattenShadowRoots(live: Element, clone: Element) {
   const sr = (live as any).shadowRoot as ShadowRoot | null | undefined;
   if (sr) {
-    for (const child of Array.from(sr.childNodes) as Node[]) {
+    shadowRootCount++;
+    const kids = Array.from(sr.childNodes) as Node[];
+    shadowRootNodesAppended += kids.length;
+    for (const child of kids) {
       clone.appendChild(clone.ownerDocument.importNode(child, true));
     }
+  } else if (live.tagName.includes("-")) {
+    customElementCount++;
   }
   const liveKids = Array.from(live.children);
   const cloneKids = Array.from(clone.children);
@@ -26,9 +35,14 @@ async function extractContent(): Promise<{ title: string; content: string; url: 
   let readabilityLen = 0;
   let innerTextLen = 0;
 
+  shadowRootCount = 0;
+  shadowRootNodesAppended = 0;
+  customElementCount = 0;
+
   try {
     const doc = document.cloneNode(true) as Document;
     flattenShadowRoots(document.body, doc.body);
+    L(`DOM scan: ${shadowRootCount} shadow roots found, ${shadowRootNodesAppended} shadow nodes appended, ${customElementCount} custom elements without shadowRoot`);
     const reader = new Readability(doc);
     const article = reader.parse();
     content = article?.textContent || "";
