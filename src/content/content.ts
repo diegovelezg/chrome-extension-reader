@@ -1,103 +1,5 @@
 import { Readability, isProbablyReaderable } from "@mozilla/readability";
 
-const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "LINK", "SVG", "CANVAS", "IFRAME", "TEMPLATE"]);
-
-function cloneComposed(node: Node, dest: Document): Node {
-  if (node.nodeType === Node.TEXT_NODE) {
-    return dest.createTextNode(node.textContent || "");
-  }
-  if (node.nodeType !== Node.ELEMENT_NODE) {
-    return dest.createTextNode("");
-  }
-
-  const el = node as Element;
-  if (SKIP_TAGS.has(el.tagName)) return dest.createTextNode("");
-
-  const clone = dest.createElement(el.tagName);
-  for (const attr of Array.from(el.attributes)) {
-    try { clone.setAttribute(attr.name, attr.value); } catch {}
-  }
-
-  for (const child of Array.from(el.childNodes)) {
-    clone.appendChild(cloneComposed(child, dest));
-  }
-
-  const sr = (el as any).shadowRoot as ShadowRoot | null | undefined;
-  if (sr) {
-    for (const child of Array.from(sr.childNodes) as Node[]) {
-      clone.appendChild(cloneComposed(child, dest));
-    }
-  }
-
-  return clone;
-}
-
-function buildDocumentWithShadowDOM(): Document {
-  const doc = document.implementation.createHTMLDocument(document.title);
-  const base = doc.createElement("base");
-  base.href = document.baseURI;
-  doc.head.prepend(base);
-
-  for (const child of Array.from(document.body.childNodes)) {
-    doc.body.appendChild(cloneComposed(child, doc));
-  }
-
-  return doc;
-}
-
-const NAV_ROLES = new Set(["navigation", "banner", "search", "complementary", "contentinfo", "menu", "menubar", "toolbar", "tablist", "tab", "toolbar"]);
-
-function htmlToText(html: string): string {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  const walker = document.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        const el = node as HTMLElement;
-        const tag = el.tagName;
-        if (el.hidden || tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT") return NodeFilter.FILTER_REJECT;
-        if (tag === "NAV") return NodeFilter.FILTER_REJECT;
-        if (el.getAttribute("aria-hidden") === "true") return NodeFilter.FILTER_REJECT;
-        const role = el.getAttribute("role");
-        if (role && NAV_ROLES.has(role)) return NodeFilter.FILTER_REJECT;
-      }
-      return NodeFilter.SHOW_ALL;
-    },
-  });
-
-  const blocks = new Set(["P", "DIV", "BR", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "TR", "BLOCKQUOTE", "HR", "FIGCAPTION", "DT", "DD", "SECTION", "ARTICLE", "HEADER", "FOOTER", "DETAILS", "SUMMARY"]);
-  const inlinesNeedingSpace = new Set(["A", "SPAN", "B", "I", "EM", "STRONG", "CODE", "MARK", "SMALL", "SUB", "SUP"]);
-
-  const parts: string[] = [];
-  let prevWasBlock = false;
-
-  while (walker.nextNode()) {
-    const node = walker.currentNode;
-
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      const el = node as HTMLElement;
-      if (blocks.has(el.tagName)) {
-        if (!prevWasBlock && parts.length > 0) parts.push("\n");
-        prevWasBlock = true;
-      } else if (inlinesNeedingSpace.has(el.tagName) && parts.length > 0) {
-        const last = parts[parts.length - 1];
-        if (last && !last.endsWith(" ") && !last.endsWith("\n")) parts.push(" ");
-      }
-    } else if (node.nodeType === Node.TEXT_NODE) {
-      const text = node.textContent || "";
-      const trimmed = text.replace(/\s+/g, " ");
-      if (trimmed && trimmed !== " ") {
-        parts.push(trimmed);
-        prevWasBlock = false;
-      }
-    }
-  }
-
-  return parts
-    .join("")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
 async function extractContent(): Promise<{ title: string; content: string; url: string }> {
   const title = document.title || "";
   const url = window.location.href;
@@ -105,31 +7,16 @@ async function extractContent(): Promise<{ title: string; content: string; url: 
   let content = "";
 
   try {
-    const doc = buildDocumentWithShadowDOM();
+    const doc = document.cloneNode(true) as Document;
     const reader = new Readability(doc);
     const article = reader.parse();
-    if (article?.content) {
-      content = htmlToText(article.content);
-    } else if (article?.textContent) {
-      content = article.textContent;
-    }
+    content = article?.textContent || "";
   } catch {
     // fallback below
   }
 
-  if (!content) {
-    const selectors = ["article", '[role="main"]', "main", ".post-content", ".article-content", "#content", ".content"];
-    for (const selector of selectors) {
-      const el = document.querySelector(selector);
-      if (el) {
-        content = el.textContent || "";
-        break;
-      }
-    }
-  }
-
-  if (!content) {
-    content = document.body.textContent || "";
+  if (content.length < 200) {
+    content = document.body.innerText || "";
   }
 
   content = content
