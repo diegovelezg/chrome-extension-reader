@@ -15,8 +15,9 @@ async function extractContent(): Promise<{ title: string; content: string; url: 
     // fallback below
   }
 
-  if (content.length < 200) {
-    content = document.body.innerText || "";
+  const liveText = document.body.innerText || "";
+  if (liveText.length > content.length * 3) {
+    content = liveText;
   }
 
   content = content
