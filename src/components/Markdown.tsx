@@ -46,6 +46,10 @@ export function Markdown({ content }: { content: string }) {
   let codeBlockLines: string[] = [];
   let inList: "ul" | "ol" | null = null;
   let listItems: ReactNode[] = [];
+  let inTable = false;
+  let tableHeader: string[] = [];
+  let tableRows: string[][] = [];
+  let tableAligns: ("left" | "right" | "center" | null)[] = [];
 
   function flushList() {
     if (inList && listItems.length > 0) {
@@ -53,6 +57,63 @@ export function Markdown({ content }: { content: string }) {
       elements.push(<Tag className="list-inside mb-2" style={{ listStyleType: inList === "ul" ? "disc" : "decimal" }}>{listItems}</Tag>);
       listItems = [];
       inList = null;
+    }
+  }
+
+  function parseTableRow(line: string): string[] {
+    let s = line.trim();
+    if (s.startsWith("|")) s = s.slice(1);
+    if (s.endsWith("|") && s.length > 1) s = s.slice(0, -1);
+    return s.split("|").map(c => c.trim());
+  }
+
+  function parseTableSeparator(line: string): ("left" | "right" | "center" | null)[] | null {
+    let s = line.trim();
+    if (s.startsWith("|")) s = s.slice(1);
+    if (s.endsWith("|") && s.length > 1) s = s.slice(0, -1);
+    const cells = s.split("|").map(c => c.trim());
+    if (cells.length === 0) return null;
+    if (!cells.every(c => /^:?-+:?$/.test(c))) return null;
+    return cells.map(c => {
+      const left = c.startsWith(":");
+      const right = c.endsWith(":");
+      if (left && right) return "center";
+      if (right) return "right";
+      if (left) return "left";
+      return null;
+    });
+  }
+
+  function flushTable() {
+    if (inTable && tableHeader.length > 0) {
+      const headerCells = tableHeader.map((cell, i) => (
+        <th key={i} className="px-3 py-2 font-semibold border border-border" style={{ textAlign: tableAligns[i] || "left" }}>
+          {renderInline(cell)}
+        </th>
+      ));
+      const bodyRows = tableRows.map((row, ri) => (
+        <tr key={ri} className="even:bg-muted/30">
+          {row.map((cell, ci) => (
+            <td key={ci} className="px-3 py-2 border border-border align-top" style={{ textAlign: tableAligns[ci] || "left" }}>
+              {renderInline(cell)}
+            </td>
+          ))}
+        </tr>
+      ));
+      elements.push(
+        <div key={elements.length} className="overflow-x-auto mb-3">
+          <table className="w-full text-sm border-collapse">
+            <thead className="bg-muted/50">
+              <tr>{headerCells}</tr>
+            </thead>
+            <tbody>{bodyRows}</tbody>
+          </table>
+        </div>
+      );
+      tableHeader = [];
+      tableRows = [];
+      tableAligns = [];
+      inTable = false;
     }
   }
 
@@ -77,9 +138,29 @@ export function Markdown({ content }: { content: string }) {
     }
 
     const trimmed = line.trim();
-    if (!trimmed) { flushList(); elements.push(<div key={elements.length} className="h-2" />); continue; }
+    if (!trimmed) { flushList(); flushTable(); elements.push(<div key={elements.length} className="h-2" />); continue; }
 
     flushList();
+
+    if (trimmed.startsWith("|")) {
+      if (!inTable) {
+        if (i + 1 < lines.length) {
+          const aligns = parseTableSeparator(lines[i + 1].trim());
+          if (aligns) {
+            inTable = true;
+            tableHeader = parseTableRow(trimmed);
+            tableAligns = aligns;
+            i++;
+            continue;
+          }
+        }
+      } else {
+        tableRows.push(parseTableRow(trimmed));
+        continue;
+      }
+    }
+
+    if (inTable) flushTable();
 
     if (trimmed.startsWith("### ")) {
       elements.push(<h3 key={elements.length} className="font-semibold text-lg mt-4 mb-1">{renderInline(trimmed.slice(4))}</h3>);
@@ -87,6 +168,12 @@ export function Markdown({ content }: { content: string }) {
       elements.push(<h2 key={elements.length} className="font-semibold text-xl mt-5 mb-2">{renderInline(trimmed.slice(3))}</h2>);
     } else if (trimmed.startsWith("# ")) {
       elements.push(<h1 key={elements.length} className="font-bold text-2xl mt-6 mb-2">{renderInline(trimmed.slice(2))}</h1>);
+    } else if (trimmed.startsWith("###### ")) {
+      elements.push(<h6 key={elements.length} className="font-semibold text-xs uppercase tracking-wide mt-2 mb-1">{renderInline(trimmed.slice(7))}</h6>);
+    } else if (trimmed.startsWith("##### ")) {
+      elements.push(<h5 key={elements.length} className="font-semibold text-sm mt-2 mb-1">{renderInline(trimmed.slice(6))}</h5>);
+    } else if (trimmed.startsWith("#### ")) {
+      elements.push(<h4 key={elements.length} className="font-semibold text-base mt-3 mb-1">{renderInline(trimmed.slice(5))}</h4>);
     } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
       inList = "ul";
       listItems.push(<li key={listItems.length} className="mb-1">{renderInline(trimmed.slice(2))}</li>);
@@ -107,6 +194,7 @@ export function Markdown({ content }: { content: string }) {
     }
   }
   flushList();
+  flushTable();
   if (inCodeBlock) {
     elements.push(<pre key={elements.length} className="bg-muted p-3 rounded-lg mb-2 overflow-x-auto text-sm"><code>{codeBlockLines.join("\n")}</code></pre>);
   }

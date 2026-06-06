@@ -30,6 +30,7 @@ export function useTTS(settings: Settings) {
   speedRef.current = state.speed;
   const cachedAudioRef = useRef<{ url: string; text: string; currentTime: number; duration: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const generationRef = useRef(0);
 
   useEffect(() => {
     if (!clientRef.current) {
@@ -48,6 +49,7 @@ export function useTTS(settings: Settings) {
   }, []);
 
   const stop = useCallback(() => {
+    generationRef.current++;
     abortRef.current?.abort();
     if (audioRef.current) {
       audioRef.current.pause();
@@ -119,6 +121,8 @@ export function useTTS(settings: Settings) {
   const play = useCallback(async (text: string, _tabId: number) => {
     if (!text.trim()) return;
 
+    const myGen = ++generationRef.current;
+
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.src = "";
@@ -136,8 +140,11 @@ export function useTTS(settings: Settings) {
       setState((prev) => ({ ...prev, isLoading: true, error: null, isFallback: false }));
       try {
         await audio.play();
+        if (myGen !== generationRef.current) return;
         return;
-      } catch {
+      } catch (error) {
+        if (myGen !== generationRef.current) return;
+        if (error instanceof DOMException && error.name === "AbortError") return;
         playFallback(text);
         return;
       }
@@ -156,6 +163,8 @@ export function useTTS(settings: Settings) {
         signal: ac.signal,
       });
 
+      if (myGen !== generationRef.current) return;
+
       const blob = new Blob([audioBuffer], { type: "audio/mp3" });
       const url = URL.createObjectURL(blob);
       revokeCachedUrl();
@@ -168,6 +177,8 @@ export function useTTS(settings: Settings) {
 
       await audio.play();
     } catch (error) {
+      if (myGen !== generationRef.current) return;
+      if (error instanceof DOMException && error.name === "AbortError") return;
       playFallback(text);
     }
   }, [state.speed, playFallback, attachAudioListeners]);
@@ -194,6 +205,7 @@ export function useTTS(settings: Settings) {
 
   useEffect(() => {
     return () => {
+      generationRef.current++;
       abortRef.current?.abort();
       if (audioRef.current) {
         audioRef.current.pause();
