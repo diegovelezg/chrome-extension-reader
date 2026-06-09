@@ -8,6 +8,51 @@ interface LLMStreamChunk {
 
 export type StreamCallback = (chunk: LLMStreamChunk) => void;
 
+async function parseSSEStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  onChunk: StreamCallback,
+  signal?: AbortSignal
+): Promise<void> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      onChunk({ content: "", done: true });
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (line.startsWith("data: ")) {
+        const data = line.slice(6).trim();
+
+        if (data === "[DONE]") {
+          onChunk({ content: "", done: true });
+          return;
+        }
+
+        try {
+          const json = JSON.parse(data);
+          const content = json.choices?.[0]?.delta?.content;
+          if (content) {
+            onChunk({ content, done: false });
+          }
+        } catch {
+          // Skip invalid JSON
+        }
+      }
+    }
+
+    if (signal?.aborted) return;
+  }
+}
+
 export class LLMClient {
   private settings: Settings;
 
@@ -15,10 +60,12 @@ export class LLMClient {
     this.settings = settings;
   }
 
+  // fallow-ignore-next-line unused-class-member
   updateSettings(settings: Settings) {
     this.settings = settings;
   }
 
+  // fallow-ignore-next-line unused-class-member
   async stream(
     prompt: string,
     systemPrompt: string | null,
@@ -29,7 +76,7 @@ export class LLMClient {
 
     try {
       const messages: { role: string; content: string }[] = [];
-      
+
       if (systemPrompt) {
         messages.push({ role: "system", content: systemPrompt });
       }
@@ -58,44 +105,10 @@ export class LLMClient {
         throw new Error("No response body");
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        
-        if (done) {
-          onChunk({ content: "", done: true });
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6).trim();
-            
-            if (data === "[DONE]") {
-              onChunk({ content: "", done: true });
-              return;
-            }
-
-            try {
-              const json = JSON.parse(data);
-              const content = json.choices?.[0]?.delta?.content;
-              if (content) {
-                onChunk({ content, done: false });
-              }
-            } catch {
-              // Skip invalid JSON
-            }
-          }
-        }
-      }
+      await parseSSEStream(response.body.getReader(), onChunk, signal);
     } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (signal?.aborted) return;
       const message = error instanceof Error ? error.message : "Unknown error";
       onChunk({ content: "", done: true, error: message });
     }

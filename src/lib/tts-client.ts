@@ -14,10 +14,12 @@ export class TTSClient {
     this.settings = settings;
   }
 
+  // fallow-ignore-next-line unused-class-member
   updateSettings(settings: Settings) {
     this.settings = settings;
   }
 
+  // fallow-ignore-next-line unused-class-member
   async synthesize(options: TTSOptions): Promise<ArrayBuffer> {
     const { ttsEndpoint, ttsVoice } = this.settings;
     const { input, voice, speed = 1.0, signal } = options;

@@ -22,36 +22,33 @@ function isValidUrl(value: string): boolean {
   }
 }
 
+const VALIDATORS: Partial<Record<keyof Settings, (value: string) => string | undefined>> = {
+  llmEndpoint: (v) => {
+    if (!v.trim()) return "Endpoint URL is required";
+    if (!isValidUrl(v.trim())) return "Must be a valid URL (http:// or https://)";
+    return undefined;
+  },
+  llmModel: (v) => (!v.trim() ? "Model is required" : undefined),
+  ttsEndpoint: (v) => {
+    if (!v.trim()) return "Endpoint URL is required";
+    if (!isValidUrl(v.trim())) return "Must be a valid URL (http:// or https://)";
+    return undefined;
+  },
+  ttsVoice: (v) => (!v.trim() ? "Voice ID is required" : undefined),
+  promptExecutiveSummary: (v) => {
+    if (!v.trim()) return "Executive summary prompt is required";
+    if (!v.includes("{{content}}")) return "Must include {{content}} placeholder";
+    return undefined;
+  },
+  promptDistilledSummary: (v) => {
+    if (!v.trim()) return "Distilled summary prompt is required";
+    if (!v.includes("{{content}}")) return "Must include {{content}} placeholder";
+    return undefined;
+  },
+};
+
 function validateField(field: keyof Settings, value: string): string | undefined {
-  switch (field) {
-    case "llmEndpoint":
-      if (!value.trim()) return "Endpoint URL is required";
-      if (!isValidUrl(value.trim())) return "Must be a valid URL (http:// or https://)";
-      return undefined;
-    case "llmModel":
-      if (!value.trim()) return "Model is required";
-      return undefined;
-    case "ttsEndpoint":
-      if (!value.trim()) return "Endpoint URL is required";
-      if (!isValidUrl(value.trim())) return "Must be a valid URL (http:// or https://)";
-      return undefined;
-    case "ttsVoice":
-      if (!value.trim()) return "Voice ID is required";
-      return undefined;
-    case "promptExecutiveSummary":
-      if (!value.trim()) return "Executive summary prompt is required";
-      if (!value.includes("{{content}}")) return "Must include {{content}} placeholder";
-      return undefined;
-    case "promptDistilledSummary":
-      if (!value.trim()) return "Distilled summary prompt is required";
-      if (!value.includes("{{content}}")) return "Must include {{content}} placeholder";
-      return undefined;
-    case "llmApiKey":
-    case "ttsApiKey":
-      return undefined;
-    default:
-      return undefined;
-  }
+  return VALIDATORS[field]?.(value);
 }
 
 function validateAll(data: Settings): FieldErrors {

@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useRef, useReducer } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Mode, Settings, DEFAULT_SETTINGS, ExtractedContent, CONTENT_SCRIPT_PATH } from "../types";
 import { useLLM } from "../lib/useLLM";
 import { useTTS } from "../lib/useTTS";
+import { useTabManager, hash, normalizeContent, emptyTab } from "../lib/useTabManager";
 import { isSupportedUrl } from "../lib/utils";
 import { BookOpen, CaseUpper, Copy, Loader2, Minus, Plus, RefreshCw, Settings as SettingsIcon, TextSelect } from "lucide-react";
 import { ModeSelector } from "../components/ModeSelector";
@@ -13,29 +14,6 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../com
 
 const L = (_msg: string, ..._args: unknown[]) => {};
 
-interface TabData {
-  original: string;
-  title: string;
-  selectedText: string;
-  executive: string;
-  distilled: string;
-}
-
-function emptyTab(): TabData {
-  return { original: "", title: "", selectedText: "", executive: "", distilled: "" };
-}
-
-function hash(s: string): string {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) {
-    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-  }
-  return h.toString(36);
-}
-
-function normalizeContent(s: string): string {
-  return s.replace(/\s+/g, " ").trim();
-}
 
 function extractFromTab(tabId: number): Promise<ExtractedContent | null> {
   return new Promise((resolve) => {
@@ -87,15 +65,11 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [mode, setMode] = useState<Mode>("original");
   const [showSettings, setShowSettings] = useState(false);
-  const [, bump] = useReducer((x: number) => x + 1, 0);
 
   const { isStreaming, content: streamedContent, error, startStream, stopStream, clearContent, setContent: setLlmContent } = useLLM(settings);
   const tts = useTTS(settings);
 
-  const tabRef = useRef<TabData>(emptyTab());
-  const cacheRef = useRef(new Map<number, TabData>());
-  const currentTabIdRef = useRef<number | null>(null);
-  const panelTabIdsRef = useRef(new Set<number>());
+  const { tabRef, cacheRef, currentTabIdRef, panelTabIdsRef, bump, switchToTab: switchToTabHook } = useTabManager();
   const llmCacheRef = useRef<Map<string, string>>(new Map());
   const lastExtractedUrlRef = useRef<string>("");
   const contentRef = useRef<HTMLDivElement>(null);
@@ -103,14 +77,17 @@ export default function App() {
   modeRef.current = mode;
   const streamedContentRef = useRef(streamedContent);
   streamedContentRef.current = streamedContent;
-  const processWithLLMRef = useRef<(sourceContent: string, targetMode: Mode) => void>(null!);
-  const extractingRef = useRef(false);
+  const processWithLLMRef = useRef<(sourceContent: string, targetMode: Mode, force?: boolean) => void>(null!);
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [extractionError, setExtractionError] = useState<string | null>(null);
   const extractTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const extractIdRef = useRef(0);
 
   const tab = tabRef.current;
-  const isExtracting = extractingRef.current;
-  const showLoading = !tab.original && isExtracting;
+  const showLoading = !tab.original && (
+    isExtracting ||
+    (isStreaming && mode !== "original" && !streamedContent)
+  );
 
   function saveCurrentLlm() {
     const m = modeRef.current;
@@ -119,17 +96,19 @@ export default function App() {
     tab[m] = c;
   }
 
-  const processWithLLM = useCallback((sourceContent: string, targetMode: Mode) => {
+  const processWithLLM = useCallback((sourceContent: string, targetMode: Mode, force = false) => {
     const prompt = targetMode === "executive"
       ? settings.promptExecutiveSummary.replace("{{content}}", sourceContent)
       : settings.promptDistilledSummary.replace("{{content}}", sourceContent);
 
     const key = `${hash(sourceContent)}|${targetMode}|${prompt}`;
-    const cached = llmCacheRef.current.get(key);
-    if (cached !== undefined) {
-      setLlmContent(cached);
-      tab[targetMode] = cached;
-      return;
+    if (!force) {
+      const cached = llmCacheRef.current.get(key);
+      if (cached !== undefined) {
+        setLlmContent(cached);
+        tab[targetMode] = cached;
+        return;
+      }
     }
 
     startStream(prompt, null, (result) => {
@@ -139,34 +118,9 @@ export default function App() {
   }, [settings, setLlmContent, startStream]);
   processWithLLMRef.current = processWithLLM;
 
-  function switchToTab(tabId: number) {
+  function switchToTabWrapped(tabId: number) {
     L(`switchToTab(${tabId}), current=${currentTabIdRef.current}`);
-
-    if (currentTabIdRef.current !== null && tabRef.current.original) {
-      cacheRef.current.set(currentTabIdRef.current, { ...tabRef.current });
-    }
-
-    currentTabIdRef.current = tabId;
-
-    const cached = cacheRef.current.get(tabId);
-    if (cached) {
-      L(`switchToTab: loading from cache, original=${cached.original.length} chars`);
-      tabRef.current = { ...cached };
-    } else {
-      L(`switchToTab: no cache, empty tab`);
-      tabRef.current = emptyTab();
-    }
-
-    clearContent();
-    if (tabRef.current.original && modeRef.current !== "original") {
-      const field = modeRef.current as keyof TabData;
-      if (tabRef.current[field]) {
-        setLlmContent(tabRef.current[field] as string);
-      } else {
-        processWithLLMRef.current(tabRef.current.original, modeRef.current);
-      }
-    }
-    bump();
+    switchToTabHook(tabId, setLlmContent, clearContent, modeRef, processWithLLMRef);
   }
 
   function requestExtraction(silent = false, url?: string) {
@@ -178,7 +132,8 @@ export default function App() {
     if (url) lastExtractedUrlRef.current = url;
     L(`requestExtraction(tabId=${currentTabIdRef.current}, silent=${silent}, url=${url}) — prevOriginal=${tabRef.current.original.length}chars`);
     if (extractTimerRef.current) clearTimeout(extractTimerRef.current);
-    extractingRef.current = true;
+    setIsExtracting(true);
+    setExtractionError(null);
 
     if (!silent) {
       tabRef.current.original = "";
@@ -201,8 +156,12 @@ export default function App() {
           L(`extraction DISCARD id=${id} currentId=${extractIdRef.current}`);
           return;
         }
-        extractingRef.current = false;
-        if (!data) { bump(); return; }
+        setIsExtracting(false);
+        if (!data) {
+          setExtractionError("Could not extract content from this page. Try refreshing or selecting text manually.");
+          bump();
+          return;
+        }
         const newContent = data.content || "";
 
         const isNewContent = normalizeContent(tabRef.current.original) !== normalizeContent(newContent);
@@ -294,7 +253,7 @@ export default function App() {
       L(`tabs.onActivated tabId=${tabId}, current=${currentTabIdRef.current}, isPanel=${panelTabIdsRef.current.has(tabId)}`);
       if (!panelTabIdsRef.current.has(tabId)) return;
       if (tabId === currentTabIdRef.current) return;
-      switchToTab(tabId);
+      switchToTabWrapped(tabId);
     };
     chrome.tabs.onActivated.addListener(onActivated);
 
@@ -342,7 +301,7 @@ export default function App() {
         L(`onOpened: same tab, has content — skip`);
         return;
       }
-      switchToTab(tabId);
+      switchToTabWrapped(tabId);
       if (!tabRef.current.original) {
         requestExtraction();
       }
@@ -373,6 +332,15 @@ export default function App() {
     const text = streamedContent || tab.selectedText || tab.original || "";
     if (text && currentTabIdRef.current !== null) tts.play(text, currentTabIdRef.current);
   }, [streamedContent, tts]);
+
+  const handleRegenerate = useCallback(() => {
+    const currentTab = tabRef.current;
+    const source = currentTab.selectedText || currentTab.original;
+    const currentMode = modeRef.current;
+    if (source && currentMode !== "original") {
+      processWithLLMRef.current(source, currentMode, true);
+    }
+  }, []);
 
   const handleSettingsSave = useCallback((newSettings: Settings) => {
     setSettings(newSettings);
@@ -485,7 +453,22 @@ export default function App() {
         ) : !displayContent && showLoading ? (
           <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground">
             <Loader2 className="size-12 mb-4 text-muted-foreground/50 animate-spin" />
-            <p className="text-sm text-center">Extrayendo contenido...</p>
+            <p className="text-sm text-center">
+              {isExtracting ? "Extracting content..." : "Generating summary..."}
+            </p>
+            {isStreaming && !isExtracting && (
+              <button onClick={stopStream} className="text-xs hover:underline mt-2">(stop)</button>
+            )}
+          </div>
+        ) : !displayContent && extractionError ? (
+          <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground">
+            <BookOpen className="size-16 mb-4 text-muted-foreground/50" />
+            <p className="text-sm text-center px-4 text-red-600 dark:text-red-400">
+              {extractionError}
+            </p>
+            <Button variant="ghost" size="sm" onClick={handleReextract} className="mt-3">
+              <RefreshCw className="size-3.5 mr-1" /> Retry
+            </Button>
           </div>
         ) : !displayContent ? (
           <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground">
@@ -525,12 +508,21 @@ export default function App() {
             {isStreaming && (
               <div className="flex items-center gap-2 mt-4 text-sm text-muted-foreground">
                 <span className="animate-pulse">●</span>
-                <span>Generating...</span>
+                <span>{streamedContent ? "Generating..." : "Generating summary..."}</span>
                 <button onClick={stopStream} className="text-xs hover:underline">(stop)</button>
               </div>
             )}
 
-            {error && <div className="mt-4 p-3 bg-red-100 text-red-800 text-sm rounded-lg">{error}</div>}
+            {error && (
+              <div className="mt-4 p-3 bg-red-100 text-red-800 text-sm rounded-lg flex items-center justify-between gap-2">
+                <span>{error}</span>
+                {mode !== "original" && (tab.original || tab.selectedText) && (
+                  <Button variant="ghost" size="sm" onClick={handleRegenerate} className="text-red-800 hover:text-red-900">
+                    <RefreshCw className="size-3.5 mr-1" /> Regenerate
+                  </Button>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>
